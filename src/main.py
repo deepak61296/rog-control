@@ -118,6 +118,16 @@ def draw_dashboard(stdscr, state: AppState, frame: int):
     h, w = stdscr.getmaxyx()
     stdscr.clear()
 
+    # Check minimum terminal size
+    MIN_WIDTH = 78
+    MIN_HEIGHT = 22
+    if w < MIN_WIDTH or h < MIN_HEIGHT:
+        stdscr.addstr(0, 0, f"Terminal too small! Need {MIN_WIDTH}x{MIN_HEIGHT}, got {w}x{h}", curses.A_BOLD | curses.color_pair(2))
+        stdscr.addstr(2, 0, "Please resize your terminal window and try again.", curses.A_DIM)
+        stdscr.addstr(4, 0, "Press 'q' to quit.", curses.A_DIM)
+        stdscr.refresh()
+        return
+
     # Colors
     curses.start_color()
     curses.use_default_colors()
