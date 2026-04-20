@@ -196,43 +196,66 @@ def draw_dashboard(stdscr, state: AppState, frame: int):
         stdscr.addstr(13, 3, "HW Max  ", curses.A_DIM)
         stdscr.addstr(13, 11, "5.26 GHz", curses.A_DIM)
 
-    # === POWER ===
-    draw_box(stdscr, 10, 28, 7, 30, "⚡ POWER")
-    if p and p.stapm_limit > 0:
-        stdscr.addstr(11, 30, "STAPM ", curses.A_DIM)
-        stdscr.addstr(11, 36, f"{p.stapm_value:5.1f}/{p.stapm_limit:3.0f}W", curses.color_pair(1))
-        stdscr.addstr(11, 50, make_bar(p.stapm_value, p.stapm_limit, 6))
+    # === POWER (only when no NVIDIA) ===
+    if not (s and s.has_nvidia):
+        draw_box(stdscr, 10, 28, 7, 30, "⚡ POWER")
+        if p and p.stapm_limit > 0:
+            stdscr.addstr(11, 30, "STAPM ", curses.A_DIM)
+            stdscr.addstr(11, 36, f"{p.stapm_value:5.1f}/{p.stapm_limit:3.0f}W", curses.color_pair(1))
+            stdscr.addstr(11, 50, make_bar(p.stapm_value, p.stapm_limit, 6))
 
-        stdscr.addstr(12, 30, "Fast  ", curses.A_DIM)
-        stdscr.addstr(12, 36, f"{p.fast_value:5.1f}/{p.fast_limit:3.0f}W", curses.color_pair(3))
-        stdscr.addstr(12, 50, make_bar(p.fast_value, p.fast_limit, 6))
+            stdscr.addstr(12, 30, "Fast  ", curses.A_DIM)
+            stdscr.addstr(12, 36, f"{p.fast_value:5.1f}/{p.fast_limit:3.0f}W", curses.color_pair(3))
+            stdscr.addstr(12, 50, make_bar(p.fast_value, p.fast_limit, 6))
 
-        stdscr.addstr(13, 30, "Slow  ", curses.A_DIM)
-        stdscr.addstr(13, 36, f"{p.slow_value:5.1f}/{p.slow_limit:3.0f}W", curses.color_pair(3))
-        stdscr.addstr(13, 50, make_bar(p.slow_value, p.slow_limit, 6))
+            stdscr.addstr(13, 30, "Slow  ", curses.A_DIM)
+            stdscr.addstr(13, 36, f"{p.slow_value:5.1f}/{p.slow_limit:3.0f}W", curses.color_pair(3))
+            stdscr.addstr(13, 50, make_bar(p.slow_value, p.slow_limit, 6))
 
-        # GPU Power from sensors
-        if s:
-            stdscr.addstr(14, 30, "iGPU  ", curses.A_DIM)
-            stdscr.addstr(14, 36, f"{s.gpu_power:5.1f}W", curses.color_pair(4))
+            # GPU Power from sensors
+            if s:
+                stdscr.addstr(14, 30, "iGPU  ", curses.A_DIM)
+                stdscr.addstr(14, 36, f"{s.gpu_power:5.1f}W", curses.color_pair(4))
+        else:
+            stdscr.addstr(12, 30, "Fetching...", curses.A_DIM)
+
+    # === GPU (AMD iGPU) or NVIDIA (dGPU) ===
+    if s and s.has_nvidia:
+        # NVIDIA dGPU - replaces Power section
+        draw_box(stdscr, 10, 28, 8, 30, "🔥 dGPU")
+        stdscr.addstr(11, 30, "Temp  ", curses.A_DIM)
+        stdscr.addstr(11, 36, f"{s.nvidia_temp:5.1f}°C", curses.color_pair(temp_color(s.nvidia_temp)))
+        stdscr.addstr(12, 30, "Power ", curses.A_DIM)
+        stdscr.addstr(12, 36, f"{s.nvidia_power:5.1f} W", curses.color_pair(3))
+        stdscr.addstr(13, 30, "Clock ", curses.A_DIM)
+        stdscr.addstr(13, 36, f"{s.nvidia_clock:4d} MHz", curses.color_pair(4))
+        stdscr.addstr(14, 30, "Util   ", curses.A_DIM)
+        stdscr.addstr(14, 36, f"{s.nvidia_util:3d}%", curses.color_pair(3))
+        stdscr.addstr(14, 40, make_bar(s.nvidia_util, 100, 6))
+        stdscr.addstr(15, 30, "VRAM  ", curses.A_DIM)
+        stdscr.addstr(15, 36, f"{s.nvidia_vram_used:4d}/{s.nvidia_vram_total:4d}MB", curses.color_pair(4))
+        
+        # iGPU info on same row as controls
+        stdscr.addstr(16, 30, "iGPU   ", curses.A_DIM)
+        stdscr.addstr(16, 37, f"{s.gpu_clock:4d}MHz {s.gpu_power:4.1f}W", curses.color_pair(4))
     else:
-        stdscr.addstr(12, 30, "Fetching...", curses.A_DIM)
-
-    # === GPU ===
-    draw_box(stdscr, 10, 59, 7, 18, "🎮 iGPU")
-    if s:
-        stdscr.addstr(11, 61, "Clock ", curses.A_DIM)
-        stdscr.addstr(11, 67, f"{s.gpu_clock:4d} MHz", curses.color_pair(4))
-        stdscr.addstr(12, 61, "Power ", curses.A_DIM)
-        stdscr.addstr(12, 67, f"{s.gpu_power:5.1f} W", curses.color_pair(3))
-        stdscr.addstr(13, 61, "Temp  ", curses.A_DIM)
-        stdscr.addstr(13, 67, f"{s.gpu_temp:5.1f}°C", curses.color_pair(temp_color(s.gpu_temp)))
+        # AMD iGPU only
+        draw_box(stdscr, 10, 59, 7, 18, "🎮 iGPU")
+        if s:
+            stdscr.addstr(11, 61, "Clock ", curses.A_DIM)
+            stdscr.addstr(11, 67, f"{s.gpu_clock:4d} MHz", curses.color_pair(4))
+            stdscr.addstr(12, 61, "Power ", curses.A_DIM)
+            stdscr.addstr(12, 67, f"{s.gpu_power:5.1f} W", curses.color_pair(3))
+            stdscr.addstr(13, 61, "Temp  ", curses.A_DIM)
+            stdscr.addstr(13, 67, f"{s.gpu_temp:5.1f}°C", curses.color_pair(temp_color(s.gpu_temp)))
 
     # === BATTERY ===
     if s:
+        bat_row = 15 if (s and s.has_nvidia) else 15
         bat_str = f"🔋 {s.battery_percent}% ({s.battery_status})"
         bcolor = 1 if s.battery_percent > 50 else 3 if s.battery_percent > 20 else 2
-        stdscr.addstr(15, 61, bat_str[:16], curses.color_pair(bcolor))
+        bat_x = 61 if not (s and s.has_nvidia) else 1
+        stdscr.addstr(bat_row, bat_x, bat_str[:16], curses.color_pair(bcolor))
 
     # === CONTROLS ===
     draw_box(stdscr, 17, 1, 8, 76, "⌨️ CONTROLS")

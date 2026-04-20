@@ -22,6 +22,14 @@ class SystemStats:
     battery_percent: int = 0
     battery_power: float = 0.0
     battery_status: str = ""
+    # NVIDIA GPU stats (if available)
+    has_nvidia: bool = False
+    nvidia_temp: float = 0.0
+    nvidia_power: float = 0.0
+    nvidia_clock: int = 0
+    nvidia_util: int = 0
+    nvidia_vram_used: int = 0
+    nvidia_vram_total: int = 0
 
 
 class SensorReader:
@@ -29,6 +37,53 @@ class SensorReader:
 
     def __init__(self):
         self._hwmon_paths = self._detect_hwmon_paths()
+        self._has_nvidia = self._check_nvidia()
+
+    def _check_nvidia(self) -> bool:
+        """Check if NVIDIA GPU is available"""
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0 and result.stdout.strip() != ""
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def get_nvidia_stats(self) -> Dict:
+        """Get NVIDIA GPU stats using nvidia-smi"""
+        if not self._has_nvidia:
+            return {
+                'temp': 0.0, 'power': 0.0, 'clock': 0, 'util': 0,
+                'vram_used': 0, 'vram_total': 0
+            }
+        
+        try:
+            # Query multiple GPU metrics at once for efficiency
+            result = subprocess.run([
+                'nvidia-smi',
+                '--query-gpu=temperature.gpu,power.draw,clocks.gr,utilization.gpu,memory.used,memory.total',
+                '--format=csv,noheader,nounits'
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split(',')
+                if len(parts) >= 6:
+                    return {
+                        'temp': float(parts[0].strip()),
+                        'power': float(parts[1].strip()),
+                        'clock': int(parts[2].strip()),
+                        'util': int(parts[3].strip()),
+                        'vram_used': int(parts[4].strip()),
+                        'vram_total': int(parts[5].strip())
+                    }
+        except (subprocess.TimeoutExpired, ValueError, IndexError):
+            pass
+        
+        return {
+            'temp': 0.0, 'power': 0.0, 'clock': 0, 'util': 0,
+            'vram_used': 0, 'vram_total': 0
+        }
 
     def _detect_hwmon_paths(self) -> Dict[str, str]:
         """Auto-detect hwmon paths by reading name files"""
@@ -145,6 +200,7 @@ class SensorReader:
         cpu_fan, gpu_fan = self.get_fan_speeds()
         cpu_cur, cpu_max = self.get_cpu_freq()
         battery = self.get_battery_info()
+        nvidia = self.get_nvidia_stats()
 
         return SystemStats(
             cpu_temp=self.get_cpu_temp(),
@@ -159,4 +215,12 @@ class SensorReader:
             battery_percent=battery['percent'],
             battery_power=battery['power'],
             battery_status=battery['status'],
+            # NVIDIA GPU stats
+            has_nvidia=self._has_nvidia,
+            nvidia_temp=nvidia['temp'],
+            nvidia_power=nvidia['power'],
+            nvidia_clock=nvidia['clock'],
+            nvidia_util=nvidia['util'],
+            nvidia_vram_used=nvidia['vram_used'],
+            nvidia_vram_total=nvidia['vram_total'],
         )
