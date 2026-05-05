@@ -1,142 +1,157 @@
-"""CPU frequency control module"""
-import os
+"""CPU frequency control module."""
+
+from __future__ import annotations
+
 import glob
+import os
+import shutil
 import subprocess
 from typing import List, Optional
 
+from src.core.sensors import Capability
+
 
 class CPUController:
-    """Controls CPU frequency scaling"""
+    """Controls CPU frequency scaling limits."""
 
     CPU_PATH = "/sys/devices/system/cpu"
-
-    # Preset frequencies in kHz
     FREQ_PRESETS = {
-        'ultra_low': 1500000,   # 1.5 GHz
-        'low': 2000000,         # 2.0 GHz
-        'eco': 2500000,         # 2.5 GHz
-        'cool': 3000000,        # 3.0 GHz
-        'balanced': 3500000,    # 3.5 GHz
-        'performance': 4000000, # 4.0 GHz
-        'high': 4500000,        # 4.5 GHz
-        'max': 5263000,         # 5.26 GHz (hardware max)
+        "ultra_low": 1500000,
+        "low": 2000000,
+        "eco": 2500000,
+        "cool": 3000000,
+        "balanced": 3500000,
+        "performance": 4000000,
+        "high": 4500000,
+        "max": 5263000,
     }
 
     def __init__(self):
         self.num_cores = self._count_cores()
         self.hw_max_freq = self._get_hw_max_freq()
         self.hw_min_freq = self._get_hw_min_freq()
+        self.capability = self._detect_capability()
+        self.last_error = ""
+
+    def _detect_capability(self) -> Capability:
+        if not os.path.exists(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_max_freq"):
+            return Capability(False, "CPU frequency scaling interface unavailable")
+        if not shutil.which("sudo"):
+            return Capability(False, "sudo not installed")
+        return Capability(True)
 
     def _count_cores(self) -> int:
-        """Count number of CPU cores"""
         return len(glob.glob(f"{self.CPU_PATH}/cpu[0-9]*"))
 
     def _get_hw_max_freq(self) -> int:
-        """Get hardware maximum frequency"""
         try:
-            with open(f"{self.CPU_PATH}/cpu0/cpufreq/cpuinfo_max_freq", 'r') as f:
-                return int(f.read().strip())
-        except:
-            return 5263000  # Default for G14 2023
+            with open(f"{self.CPU_PATH}/cpu0/cpufreq/cpuinfo_max_freq", "r", encoding="utf-8") as handle:
+                return int(handle.read().strip())
+        except (OSError, ValueError):
+            return 5263000
 
     def _get_hw_min_freq(self) -> int:
-        """Get hardware minimum frequency"""
         try:
-            with open(f"{self.CPU_PATH}/cpu0/cpufreq/cpuinfo_min_freq", 'r') as f:
-                return int(f.read().strip())
-        except:
-            return 400000  # 400 MHz
+            with open(f"{self.CPU_PATH}/cpu0/cpufreq/cpuinfo_min_freq", "r", encoding="utf-8") as handle:
+                return int(handle.read().strip())
+        except (OSError, ValueError):
+            return 400000
 
     def get_current_freq(self, core: int = 0) -> int:
-        """Get current frequency for a core in kHz"""
         try:
-            with open(f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_cur_freq", 'r') as f:
-                return int(f.read().strip())
-        except:
+            with open(f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_cur_freq", "r", encoding="utf-8") as handle:
+                return int(handle.read().strip())
+        except (OSError, ValueError):
             return 0
 
     def get_max_freq(self, core: int = 0) -> int:
-        """Get current max frequency limit for a core in kHz"""
         try:
-            with open(f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_max_freq", 'r') as f:
-                return int(f.read().strip())
-        except:
+            with open(f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_max_freq", "r", encoding="utf-8") as handle:
+                return int(handle.read().strip())
+        except (OSError, ValueError):
             return self.hw_max_freq
 
     def get_all_core_freqs(self) -> List[int]:
-        """Get current frequency for all cores"""
-        return [self.get_current_freq(i) for i in range(self.num_cores)]
+        return [self.get_current_freq(index) for index in range(self.num_cores)]
 
     def get_governor(self) -> str:
-        """Get current CPU governor"""
         try:
-            with open(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_governor", 'r') as f:
-                return f.read().strip()
-        except:
+            with open(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_governor", "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
             return "unknown"
 
     def get_available_governors(self) -> List[str]:
-        """Get list of available governors"""
         try:
-            with open(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_available_governors", 'r') as f:
-                return f.read().strip().split()
-        except:
+            with open(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_available_governors", "r", encoding="utf-8") as handle:
+                return handle.read().strip().split()
+        except OSError:
             return []
 
-    def set_max_freq(self, freq_khz: int, cores: Optional[List[int]] = None) -> bool:
-        """Set maximum frequency for specified cores (or all cores)"""
-        # Clamp to valid range
+    def _write_with_sudo(self, path: str, value: str) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["sudo", "tee", path],
+                input=value.encode(),
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            self.last_error = str(exc)
+            return False, self.last_error
+
+        if result.returncode != 0:
+            self.last_error = (result.stderr or result.stdout or "").strip() or f"tee failed for {path}"
+            return False, self.last_error
+        self.last_error = ""
+        return True, ""
+
+    def set_max_freq(self, freq_khz: int, cores: Optional[List[int]] = None) -> tuple[bool, str]:
+        if not self.capability.available:
+            self.last_error = self.capability.reason
+            return False, self.last_error
+
         freq_khz = max(self.hw_min_freq, min(freq_khz, self.hw_max_freq))
-
-        if cores is None:
-            cores = list(range(self.num_cores))
-
-        success = True
-        for core in cores:
+        targets = cores if cores is not None else list(range(self.num_cores))
+        for core in targets:
             path = f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_max_freq"
             try:
-                # Try direct write first
-                with open(path, 'w') as f:
-                    f.write(str(freq_khz))
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(str(freq_khz))
             except PermissionError:
-                # Fall back to sudo
-                result = subprocess.run(
-                    ['sudo', 'tee', path],
-                    input=str(freq_khz).encode(),
-                    capture_output=True
-                )
-                if result.returncode != 0:
-                    success = False
+                success, message = self._write_with_sudo(path, str(freq_khz))
+                if not success:
+                    return False, message
+            except OSError as exc:
+                self.last_error = str(exc)
+                return False, self.last_error
 
-        return success
+        return True, "CPU frequency limit updated"
 
-    def set_max_freq_all(self, freq_khz: int) -> bool:
-        """Set maximum frequency for all cores using shell"""
-        cmd = f'for i in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do echo {freq_khz} | sudo tee "$i" > /dev/null; done'
-        result = subprocess.run(cmd, shell=True, capture_output=True)
-        return result.returncode == 0
+    def set_max_freq_all(self, freq_khz: int) -> tuple[bool, str]:
+        return self.set_max_freq(freq_khz)
 
-    def set_governor(self, governor: str) -> bool:
-        """Set CPU governor for all cores"""
+    def set_governor(self, governor: str) -> tuple[bool, str]:
         if governor not in self.get_available_governors():
-            return False
+            return False, f"Governor not available: {governor}"
+        for core in range(self.num_cores):
+            path = f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_governor"
+            success, message = self._write_with_sudo(path, governor)
+            if not success:
+                return False, message
+        return True, "CPU governor updated"
 
-        cmd = f'for i in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo {governor} | sudo tee "$i" > /dev/null; done'
-        result = subprocess.run(cmd, shell=True, capture_output=True)
-        return result.returncode == 0
-
-    def set_preset(self, preset_name: str) -> bool:
-        """Set frequency from a named preset"""
-        if preset_name in self.FREQ_PRESETS:
-            return self.set_max_freq_all(self.FREQ_PRESETS[preset_name])
-        return False
+    def set_preset(self, preset_name: str) -> tuple[bool, str]:
+        freq = self.FREQ_PRESETS.get(preset_name)
+        if freq is None:
+            return False, f"Unknown CPU preset: {preset_name}"
+        return self.set_max_freq_all(freq)
 
     @staticmethod
     def freq_to_ghz(freq_khz: int) -> float:
-        """Convert kHz to GHz"""
         return freq_khz / 1000000.0
 
     @staticmethod
     def ghz_to_freq(ghz: float) -> int:
-        """Convert GHz to kHz"""
         return int(ghz * 1000000)

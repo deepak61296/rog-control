@@ -1,41 +1,27 @@
-# ROG Control 🎮⚡
+# ROG Control
 
-A beautiful terminal UI for controlling thermals, fans, and power on ASUS ROG Zephyrus G14 (2023) laptops running Linux.
+A Rich-based terminal dashboard for monitoring and controlling thermals, fans, and AMD power limits on ASUS ROG laptops running Linux.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Linux-orange)
 
-## Features ✨
+## Features
 
-- **Real-time Monitoring** - Live CPU/GPU temps, fan speeds, power draw
-- **CPU Frequency Control** - Set max frequency limits (1.5-5.26 GHz)
-- **Power Management** - Full RyzenAdj integration with presets
-- **Fan Control** - Profiles and custom fan curves via asusctl
-- **Quick Presets** - One-click thermal profiles (Silent, Cool, Balanced, Beast)
-- **Beautiful TUI** - Rich terminal interface with progress bars and colors
+- Live CPU, AMD iGPU, NVIDIA dGPU, fan, battery, and NVMe telemetry
+- Separate AMD and NVIDIA sections so GPU stats are never conflated
+- CPU frequency presets, RyzenAdj power presets, ASUS profile switching, and fan curve presets
+- Capability-aware UI that keeps unsupported features visible but clearly marked unavailable
+- Professional Rich-based dashboard with compact fallback mode for narrow terminals
 
-## Screenshot
+## Interface
 
 ```
-╔══════════════════════════════════════════════════════════════════╗
-║   ⚡ ROG CONTROL ⚡  ASUS ROG Zephyrus G14                        ║
-╚══════════════════════════════════════════════════════════════════╝
-
-┌─ 🌡️ TEMPERATURES ─────┐  ┌─ 🌀 FANS ──────────────┐
-│ CPU   82.5°C ████████░░│  │ CPU   5500 RPM ████████│
-│ GPU   74.0°C ██████░░░░│  │ GPU   5800 RPM ████████│
-│ NVMe  33.8°C ███░░░░░░░│  │ Profile: Performance   │
-└────────────────────────┘  └────────────────────────┘
-
-┌─ ⚙️ CPU ────────────┐  ┌─ ⚡ POWER ────────────────┐
-│ Current  2.9 GHz    │  │ STAPM  12.5W /45W ██░░░░░│
-│ Limit    3.0 GHz    │  │ Fast   15.2W /55W ██░░░░░│
-│ Max      5.26 GHz   │  │ Slow   10.8W /45W ██░░░░░│
-└─────────────────────┘  └──────────────────────────┘
-
-[1] CPU Frequency  [2] Power Limits  [3] Fan Profile
-[4] Fan Curve      [5] Quick Presets [q] Quit
+Header: backend health for CPU hwmon, AMD GPU, NVIDIA, RyzenAdj, and ASUSCtl
+Row 1: CPU and Cooling panels
+Row 2: AMD iGPU and NVIDIA dGPU panels
+Row 3: Power and Battery/Status panels
+Footer: action shortcuts and the latest command/result message
 ```
 
 ## Requirements
@@ -44,6 +30,7 @@ A beautiful terminal UI for controlling thermals, fans, and power on ASUS ROG Ze
 - Python 3.10+
 - `asusctl` and `asusd` daemon
 - `ryzenadj` for AMD Ryzen power control
+- passwordless `sudo` for write actions if you want preset changes to succeed without prompts
 
 ## Installation
 
@@ -84,7 +71,7 @@ sudo make install
 ## Usage
 
 ```bash
-# Run the TUI
+# Run the dashboard
 rog-control
 
 # Or from the project directory
@@ -95,23 +82,23 @@ rog-control
 
 | Key | Action |
 |-----|--------|
-| `1` | CPU Frequency settings |
-| `2` | Power Limits (RyzenAdj) |
-| `3` | Fan Profile (Performance/Balanced/Quiet) |
-| `4` | Custom Fan Curves |
-| `5` | Quick Presets |
-| `r` | Refresh display |
+| `1` | CPU frequency presets |
+| `2` | RyzenAdj power presets |
+| `3` | ASUS fan profile |
+| `4` | Fan curve presets |
+| `5` | Quick combined presets |
+| `h` | Help |
+| `r` | Status refresh hint |
 | `q` | Quit |
 
 ## Quick Presets
 
 | Preset | CPU | Power | Fans | Use Case |
 |--------|-----|-------|------|----------|
-| Silent | 2.5 GHz | 15W | Quiet | Battery, quiet work |
-| Cool | 3.0 GHz | 35W | Max | General use |
-| Balanced | 3.5 GHz | 45W | Max | Mixed workloads |
-| Performance | 4.5 GHz | 55W | Max | Heavy tasks |
-| Beast Mode | 5.26 GHz | 80W | Max | Benchmarks (HOT!) |
+| Quiet Work | 2.5 GHz | 15W | Quiet curve | Battery and quiet work |
+| Cool Daily | 3.0 GHz | 35W | Balanced curve | General use |
+| Balanced | 3.5 GHz | 45W | Balanced curve | Mixed workloads |
+| Heavy Load | 4.5 GHz | 55W | Aggressive curve | Sustained heavier tasks |
 
 ## Power Presets (RyzenAdj)
 
@@ -172,14 +159,15 @@ rog-control/
 ├── requirements.txt
 ├── rog-control            # Launcher script
 ├── src/
-│   ├── main.py           # Main TUI application
+│   ├── main.py           # Entrypoint and TTY guard
 │   ├── core/
-│   │   ├── cpu.py        # CPU frequency control
-│   │   ├── power.py      # RyzenAdj integration
-│   │   ├── fans.py       # Fan control via asusctl
-│   │   └── sensors.py    # Temperature/power readings
+│   │   ├── cpu.py        # CPU frequency control backend
+│   │   ├── power.py      # RyzenAdj backend and power telemetry parsing
+│   │   ├── fans.py       # ASUSCtl backend
+│   │   └── sensors.py    # Capability-aware telemetry snapshot model
 │   └── ui/
-│       └── (future UI components)
+│       ├── __init__.py
+│       └── app.py        # Rich dashboard, menus, and collector threads
 ├── context/
 │   ├── ARCHITECTURE.md   # System architecture
 │   ├── RYZENADJ.md       # RyzenAdj reference
@@ -205,4 +193,4 @@ Deepak
 
 - [asus-linux](https://asus-linux.org/) for asusctl
 - [RyzenAdj](https://github.com/FlyGoat/RyzenAdj) for power management
-- [Rich](https://github.com/Textualize/rich) for the beautiful TUI
+- [Rich](https://github.com/Textualize/rich) for terminal rendering

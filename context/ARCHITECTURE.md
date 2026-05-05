@@ -1,176 +1,83 @@
 # ROG Control - Architecture
 
-## System Overview
+## Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      ROG Control TUI                        │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                    Rich UI Layer                     │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐  │   │
-│  │  │ Dashboard│ │ CPU Ctrl │ │Power Ctrl│ │Fan Ctrl│  │   │
-│  │  └──────────┘ └──────────┘ └──────────┘ └────────┘  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                            │                                │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                    Core Layer                        │   │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐        │   │
-│  │  │ cpu.py │ │power.py│ │ fans.py│ │sensors │        │   │
-│  │  └────────┘ └────────┘ └────────┘ └────────┘        │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                            │                                │
-└────────────────────────────│────────────────────────────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-   ┌─────────┐         ┌──────────┐         ┌─────────┐
-   │  sysfs  │         │ ryzenadj │         │ asusctl │
-   │ (kernel)│         │  (CLI)   │         │  (CLI)  │
-   └─────────┘         └──────────┘         └─────────┘
-        │                    │                    │
-        ▼                    ▼                    ▼
-   ┌─────────────────────────────────────────────────┐
-   │                   Hardware                       │
-   │  CPU (AMD Ryzen)  │  iGPU  │  Fans  │  Sensors  │
-   └─────────────────────────────────────────────────┘
+The application is a Rich-based terminal dashboard with a small core-backend layer:
+
+```text
+src/main.py
+  -> src/ui/app.py
+      -> background collectors
+      -> Rich dashboard + menus
+      -> action handlers
+  -> src/core/sensors.py
+  -> src/core/cpu.py
+  -> src/core/power.py
+  -> src/core/fans.py
 ```
 
-## Module Responsibilities
+The UI never talks to sysfs or vendor tools directly. It only renders typed snapshots and action results.
 
-### UI Layer (`src/ui/`)
+## Runtime Model
 
-**app.py** - Main application
-- Initialize Rich console and layout
-- Handle keyboard input
-- Manage screen updates (async)
-- Route to different views
+### UI layer
 
-**widgets.py** - Custom components
-- GaugeWidget - Animated progress bars
-- StatsPanel - Live updating stats
-- MenuWidget - Navigation menus
-- GraphWidget - Mini sparkline graphs
+`src/ui/app.py` owns:
 
-**themes.py** - Visual theming
-- Color schemes
-- Unicode characters for UI elements
-- Animation timings
+- terminal setup and key handling
+- the live Rich layout
+- menu routing for CPU, power, fan profile, fan curve, and quick presets
+- background collection threads
+- status and error messaging
 
-### Core Layer (`src/core/`)
+### Core layer
 
-**cpu.py** - CPU frequency control
-```python
-class CPUController:
-    def get_current_freq(core: int) -> int
-    def get_max_freq(core: int) -> int
-    def set_max_freq(freq_khz: int, cores: list[int] = None)
-    def get_governor() -> str
-    def set_governor(gov: str)
-    def get_all_cores_freq() -> list[int]
-```
+`src/core/sensors.py` owns:
 
-**power.py** - RyzenAdj wrapper
-```python
-class PowerController:
-    def get_power_info() -> dict
-    def set_stapm_limit(mw: int)
-    def set_fast_limit(mw: int)
-    def set_slow_limit(mw: int)
-    def set_tctl_temp(celsius: int)
-    def set_vrm_current(ma: int)
-    def set_preset(name: str)
-    def apply_settings(settings: dict)
-```
+- hwmon autodiscovery
+- CPU telemetry
+- AMD iGPU telemetry
+- NVIDIA dGPU telemetry via `nvidia-smi`
+- battery and fan RPM reads
+- capability-aware `SystemSnapshot` objects
 
-**fans.py** - Fan control via asusctl
-```python
-class FanController:
-    def get_fan_speeds() -> tuple[int, int]
-    def get_profile() -> str
-    def set_profile(profile: str)
-    def set_fan_curve(fan: str, curve: list[tuple[int, int]])
-    def enable_custom_curve(enable: bool)
-```
+`src/core/cpu.py` owns:
 
-**sensors.py** - Temperature/power readings
-```python
-class SensorReader:
-    def get_cpu_temp() -> float
-    def get_gpu_temp() -> float
-    def get_gpu_power() -> float
-    def get_nvme_temp() -> float
-    def get_battery_info() -> dict
-    def detect_hwmon_paths() -> dict  # Auto-detect paths
-```
+- CPU max-frequency reads and writes
+- preset frequency caps
+- governor discovery and updates
 
-**gpu.py** - GPU control
-```python
-class GPUController:
-    def get_igpu_clock() -> int
-    def get_igpu_power() -> float
-    def set_igpu_max_clock(mhz: int)
-    def get_dgpu_info() -> dict  # NVIDIA via nvidia-smi
-```
+`src/core/power.py` owns:
 
-### Utils Layer (`src/utils/`)
+- `ryzenadj` discovery
+- power table parsing
+- preset application for STAPM/Fast/Slow/Tctl
+- last-error reporting for failed backend calls
 
-**config.py** - Configuration management
-```python
-class Config:
-    def load() -> dict
-    def save(config: dict)
-    def get_preset(name: str) -> dict
-    def save_preset(name: str, settings: dict)
-```
+`src/core/fans.py` owns:
 
-**helpers.py** - Utility functions
-```python
-def read_sysfs(path: str) -> str
-def write_sysfs(path: str, value: str) -> bool
-def run_command(cmd: list[str], sudo: bool = False) -> str
-def format_freq(khz: int) -> str  # "3.0 GHz"
-def format_power(mw: int) -> str  # "45 W"
-def format_temp(celsius: float) -> str  # "65.2°C"
-```
+- `asusctl` discovery
+- active profile reads
+- custom fan curve enablement
+- curve preset and profile writes
+- last-error reporting for failed backend calls
 
-## Data Flow
+## Snapshot Contract
 
-### Reading Sensors (every 1-2 seconds)
-```
-SensorReader.get_cpu_temp()
-    → read /sys/class/hwmon/hwmon5/temp1_input
-    → parse and convert (millidegrees → degrees)
-    → return float
+The UI renders one `SystemSnapshot` at a time. The snapshot separates:
 
-Dashboard.update()
-    → call all SensorReader methods
-    → update Rich Live display
-```
+- CPU telemetry
+- AMD iGPU telemetry
+- NVIDIA dGPU telemetry
+- cooling telemetry
+- battery telemetry
+- capability flags and collection errors
 
-### Setting Power Limit
-```
-User presses key → MenuWidget
-    → PowerController.set_stapm_limit(45000)
-    → subprocess.run(['sudo', 'ryzenadj', '--stapm-limit=45000'])
-    → verify with get_power_info()
-    → update UI
-```
+This separation prevents the old bug where generic `gpu_*` fields mixed integrated and discrete GPU data.
 
-## Threading Model
-```
-Main Thread:
-    - Rich Live display updates
-    - Keyboard input handling
+## Error Handling
 
-Background Thread (daemon):
-    - Sensor polling every 1 second
-    - Updates shared state dict
-    - Main thread reads state for display
-```
-
-## Error Handling Strategy
-1. Never crash on sysfs read failures (return None/default)
-2. Show user-friendly error messages in UI
-3. Log errors to ~/.cache/rog-control/error.log
-4. Graceful degradation (if ryzenadj fails, disable power controls)
+- Missing hardware or binaries are represented as unavailable capabilities, not fake zeroes.
+- Backend command failures are surfaced as user-visible status and warning text.
+- Transient backend failures do not permanently disable retry attempts during the session.
+- Narrow terminals fall back to a compact summary view instead of rendering a broken dashboard.
