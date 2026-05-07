@@ -174,29 +174,47 @@ def _sparkline(values: list[float], width: int = 12) -> str:
 
 
 def _fmt_temp(value: Optional[float]) -> str:
-    return f"{value:.1f} C" if value is not None else "Unavailable"
+    if value is None:
+        return "---"
+    if value >= 85:
+        return str(value) + " C"
+    if value >= 70:
+        return str(value) + " C"
+    return str(value) + " C"
 
 
 def _fmt_power(value: Optional[float]) -> str:
-    return f"{value:.1f} W" if value is not None else "Unavailable"
+    if value is None:
+        return "---"
+    return f"{value:.1f} W"
 
 
 def _fmt_freq(value: Optional[int]) -> str:
-    return f"{value / 1000:.2f} GHz" if value is not None else "Unavailable"
+    if value is None:
+        return "---"
+    return f"{value / 1000:.2f} GHz"
 
 
 def _fmt_rpm(value: Optional[int]) -> str:
-    return f"{value} RPM" if value is not None else "Unavailable"
+    if value is None:
+        return "---"
+    return f"{value} RPM"
 
 
 def _fmt_percent(value: Optional[int]) -> str:
-    return f"{value}%" if value is not None else "Unavailable"
+    if value is None:
+        return "---"
+    if value >= 95:
+        return str(value) + "%"
+    if value >= 80:
+        return str(value) + "%"
+    return str(value) + "%"
 
 
 def _capability_badge(capability: Capability, label: str) -> Text:
     if capability.available:
-        return Text(f"{label}: OK", style="bold green")
-    return Text(f"{label}: {capability.reason}", style="bold yellow")
+        return Text("● " + label, style="bold green")
+    return Text("○ " + label, style="bold yellow")
 
 
 class RogControlApp:
@@ -229,7 +247,7 @@ class RogControlApp:
     }
 
     def __init__(self):
-        self.console = Console()
+        self.console = Console(force_terminal=True)
         self.state = AppState()
         self.collector = DataCollector(self.state)
 
@@ -373,12 +391,12 @@ class RogControlApp:
             _capability_badge(snapshot.capabilities.get("amd_hwmon", Capability(False, "unknown")), "AMD GPU"),
             _capability_badge(snapshot.capabilities.get("nvidia", Capability(False, "unknown")), "NVIDIA"),
             self._backend_badge(self.collector.power.capability, self.collector.power.last_error, "RyzenAdj"),
-            self._backend_badge(self.collector.fans.capability, self.collector.fans.last_error, "ASUSCtl"),
+            self._backend_badge(self.collector.fans.capability, self.collector.fans.last_error, "asusctl"),
         ]
         body = Columns(badges, expand=True)
-        title = Text("ROG Control", style="bold cyan")
-        subtitle = Text("Telemetry and thermal controls", style="dim")
-        return Panel(Group(Align.center(title), Align.center(subtitle), body), border_style="cyan")
+        title = Text("ROG Control", style="bold green")
+        subtitle = Text("System Monitoring", style="dim")
+        return Panel(Group(Align.center(title), Align.center(subtitle), body), border_style="green")
 
     def _metric_table(self, title: str, rows: list[tuple[str, str]]) -> Panel:
         table = Table.grid(expand=True)
@@ -386,7 +404,7 @@ class RogControlApp:
         table.add_column(justify="right", ratio=1)
         for label, value in rows:
             table.add_row(label, value)
-        return Panel(table, title=title, border_style="blue")
+        return Panel(table, title=title, border_style="green")
 
     def _render_cpu_panel(self, state: AppState) -> Panel:
         cpu = state.snapshot.cpu
@@ -478,10 +496,10 @@ class RogControlApp:
 
     def _render_footer(self, state: AppState) -> Panel:
         help_text = Text.from_markup(
-            "[bold]1[/] CPU  [bold]2[/] Power  [bold]3[/] Fan Profile  [bold]4[/] Fan Curve  [bold]5[/] Quick Presets  [bold]h[/] Help  [bold]q[/] Quit"
+            "[bold green]1[/] CPU  [bold green]2[/] Power  [bold green]3[/] Fan  [bold green]4[/] Curve  [bold green]5[/] Quick  [bold green]h[/] Help  [bold green]q[/] Quit"
         )
         status = Text(state.message, style=state.message_style)
-        return Panel(Group(help_text, status), border_style="magenta")
+        return Panel(Group(help_text, status), border_style="green")
 
     def _render_menu(self, state: AppState) -> Panel:
         renderers = {
