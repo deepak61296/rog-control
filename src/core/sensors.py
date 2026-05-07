@@ -77,6 +77,7 @@ class SensorReader:
     def __init__(self):
         self._hwmon_paths = self._detect_hwmon_paths()
         self._nvidia_smi = shutil.which("nvidia-smi")
+        self._hwmon_paths_valid = True
 
     def _detect_hwmon_paths(self) -> Dict[str, str]:
         paths: Dict[str, str] = {}
@@ -142,12 +143,16 @@ class SensorReader:
         current = self._read_int(os.path.join(base, "scaling_cur_freq"))
         maximum = self._read_int(os.path.join(base, "scaling_max_freq"))
         governor = self._read_sysfs(os.path.join(base, "scaling_governor"))
+        temp = self._read_hwmon_temp("k10temp")
         snapshot.cpu = CPUStats(
-            temp_c=self._read_hwmon_temp("k10temp"),
+            temp_c=temp,
             current_freq_mhz=current // 1000 if current is not None else None,
             max_freq_mhz=maximum // 1000 if maximum is not None else None,
             governor=governor,
         )
+        # Mark hwmon paths as invalid if temp read fails (path might have changed)
+        if temp is None and "k10temp" in self._hwmon_paths:
+            self._hwmon_paths_valid = False
 
     def _read_amd_gpu(self, snapshot: SystemSnapshot) -> None:
         base = self._hwmon_paths.get("amdgpu")
@@ -222,7 +227,10 @@ class SensorReader:
 
     def get_snapshot(self) -> SystemSnapshot:
         snapshot = SystemSnapshot()
-        self._hwmon_paths = self._detect_hwmon_paths()
+        # Only re-detect hwmon paths if previous detection failed or on explicit refresh
+        if not self._hwmon_paths_valid or not self._hwmon_paths:
+            self._hwmon_paths = self._detect_hwmon_paths()
+            self._hwmon_paths_valid = bool(self._hwmon_paths)
 
         snapshot.capabilities["amd_hwmon"] = Capability(
             "amdgpu" in self._hwmon_paths,

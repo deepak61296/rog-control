@@ -98,11 +98,15 @@ class FanController:
             return False, message
 
         if profile == "Performance":
-            success, message = self.set_max_fans(profile)
+            # Set max fan curve and enable custom curves for Performance
+            success, message = self.set_fan_curve_preset("max", profile)
+            if success:
+                success, message = self.enable_custom_curves(profile, True)
             if success:
                 return True, "Performance profile applied with max fan curve"
             return False, message
 
+        # For Balanced and Quiet, use firmware fan control (disable custom curves)
         success, message = self.enable_custom_curves(profile, False)
         if success:
             return True, f"{profile} profile applied with firmware fan control"
@@ -112,16 +116,6 @@ class FanController:
         success, output = self._run_asusctl(["fan-curve", "-m", profile, "-f", fan, "-D", curve.to_asusctl_format()])
         return success, "Fan curve updated" if success else output
 
-    def set_fan_curve_preset(self, preset: str, profile: str = "Performance") -> tuple[bool, str]:
-        curve = self.FAN_CURVES.get(preset)
-        if curve is None:
-            return False, f"Unknown fan curve preset: {preset}"
-
-        success_cpu, cpu_msg = self.set_fan_curve(curve, "cpu", profile)
-        success_gpu, gpu_msg = self.set_fan_curve(curve, "gpu", profile)
-        if success_cpu and success_gpu:
-            return True, "Fan curve preset applied"
-        return False, cpu_msg if not success_cpu else gpu_msg
 
     def enable_custom_curves(self, profile: str = "Performance", enable: bool = True) -> tuple[bool, str]:
         success, output = self._run_asusctl(["fan-curve", "-m", profile, "-e", str(enable).lower()])

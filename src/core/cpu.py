@@ -116,16 +116,10 @@ class CPUController:
         targets = cores if cores is not None else list(range(self.num_cores))
         for core in targets:
             path = f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_max_freq"
-            try:
-                with open(path, "w", encoding="utf-8") as handle:
-                    handle.write(str(freq_khz))
-            except PermissionError:
-                success, message = self._write_with_sudo(path, str(freq_khz))
-                if not success:
-                    return False, message
-            except OSError as exc:
-                self.last_error = str(exc)
-                return False, self.last_error
+            # Always use sudo since system files require root permissions
+            success, message = self._write_with_sudo(path, str(freq_khz))
+            if not success:
+                return False, message
 
         return True, "CPU frequency limit updated"
 
