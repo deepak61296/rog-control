@@ -7,7 +7,6 @@ export default function LogsPanel() {
   const lastError = useDashboardStore((s) => s.lastError);
   const connected = useDashboardStore((s) => s.backendConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const logsRef = useRef<string[]>([]);
 
   // Build logs from current state
   const logs: { text: string; color: string }[] = [];

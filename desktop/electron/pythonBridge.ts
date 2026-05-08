@@ -70,7 +70,7 @@ export class PythonBridge extends EventEmitter {
       this.scheduleReconnect();
     });
 
-    this.ws.on('error', (err) => {
+    this.ws.on('error', (err: Error) => {
       console.error('WebSocket error:', err.message);
     });
   }

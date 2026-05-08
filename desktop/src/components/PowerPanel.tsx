@@ -1,5 +1,4 @@
 import GlassPanel from './GlassPanel';
-import Gauge from './Gauge';
 import ProgressBar from './ProgressBar';
 import { useDashboardStore } from '@/store/dashboardStore';
 

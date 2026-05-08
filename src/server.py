@@ -11,11 +11,14 @@ import asyncio
 import json
 import signal
 import sys
+from pathlib import Path
 from dataclasses import asdict
 from typing import Any
 
+# Add project root to sys.path so 'src' package is importable
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import websockets
-from websockets.server import WebSocketServerProtocol
 
 from src.core.sensors import SensorReader, SystemSnapshot
 from src.core.cpu import CPUController

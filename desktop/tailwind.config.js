@@ -4,36 +4,35 @@ export default {
   theme: {
     extend: {
       colors: {
-        neon: {
-          green: '#00ff00',
-          'bright-green': '#00ff88',
-          teal: '#00cc88',
-          cyan: '#00ffff',
-          pink: '#ff00ff',
-          blue: '#00aaff',
-          violet: '#aa00ff',
-          orange: '#ff6600',
-        },
-        panel: {
-          bg: 'rgba(0, 17, 8, 0.4)',
-          border: 'rgba(0, 170, 68, 0.2)',
-        },
-        cyber: {
-          black: '#0a0a0f',
-          dark: '#0d1117',
-        },
+        'cyber-black': '#0a0a0f',
+        'cyber-panel': 'rgba(0,17,8,0.4)',
+        'neon-green': '#00ff00',
+        'neon-cyan': '#00ffff',
+        'neon-pink': '#ff00ff',
+        'neon-orange': '#ff6600',
+        'neon-teal': '#00cc88',
+        'neon-yellow': '#ffff00',
+        'neon-red': '#ff4444',
+        'dim-green': '#008844',
+        'border-green': '#00aa44',
+        'glass-bg': 'rgba(0,17,8,0.4)',
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-        display: ['JetBrains Mono', 'monospace'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
+      backdropBlur: {
+        xs: '2px',
+        sm: '4px',
+        md: '8px',
+        lg: '12px',
+        xl: '16px',
       },
       boxShadow: {
-        'neon-green': '0 0 15px rgba(0, 255, 0, 0.15), 0 0 30px rgba(0, 255, 0, 0.05)',
-        'neon-cyan': '0 0 15px rgba(0, 255, 255, 0.15), 0 0 30px rgba(0, 255, 255, 0.05)',
-        'neon-pink': '0 0 15px rgba(255, 0, 255, 0.15), 0 0 30px rgba(255, 0, 255, 0.05)',
-        'panel': '0 4px 24px rgba(0, 0, 0, 0.4)',
+        'glow-green': '0 0 15px rgba(0,255,0,0.15), inset 0 0 15px rgba(0,255,0,0.05)',
+        'glow-cyan': '0 0 15px rgba(0,255,255,0.15), inset 0 0 15px rgba(0,255,255,0.05)',
+        'glow-pink': '0 0 15px rgba(255,0,255,0.15), inset 0 0 15px rgba(255,0,255,0.05)',
       },
     },
   },
   plugins: [],
-};
+}

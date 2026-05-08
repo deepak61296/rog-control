@@ -1,5 +1,3 @@
-import { useMemo } from 'react';
-
 interface BarProps {
   value: number;
   max: number;

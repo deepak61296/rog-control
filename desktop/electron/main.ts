@@ -5,9 +5,7 @@ import { PythonBridge } from './pythonBridge';
 let mainWindow: BrowserWindow | null = null;
 let pythonBridge: PythonBridge | null = null;
 
-const isDev = !app.isPackaged;
-
-function createWindow() {
+function createWindow(url: string) {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -23,14 +21,14 @@ function createWindow() {
     },
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-  }
+  mainWindow.loadURL(url);
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   pythonBridge = new PythonBridge();
 
   pythonBridge.on('data', (payload) => {
@@ -45,9 +43,14 @@ app.whenReady().then(async () => {
     }
   });
 
-  createWindow();
+  // Always start Python server
+  pythonBridge.start();
 
-  ipcMain.handle('send-command', async (_event, command: object) => {
+  // Use built files for now (simpler than Vite dev server)
+  const indexPath = path.join(__dirname, '../dist/index.html');
+  createWindow(`file://${indexPath}`);
+
+  ipcMain.handle('send-command', async (_event, command: any) => {
     try {
       await pythonBridge?.sendCommand(command);
       return { success: true };
@@ -59,8 +62,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('get-backend-status', () => {
     return pythonBridge?.connected ?? false;
   });
-
-  pythonBridge.start();
 });
 
 app.on('window-all-closed', () => {

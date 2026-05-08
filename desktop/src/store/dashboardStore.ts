@@ -12,7 +12,7 @@ interface DashboardState {
   sendCommand: (action: string, params?: Record<string, any>) => Promise<string>;
 }
 
-export const useDashboardStore = create<DashboardState>((set, get) => ({
+export const useDashboardStore = create<DashboardState>((set) => ({
   telemetry: null,
   backendConnected: false,
   lastError: null,
