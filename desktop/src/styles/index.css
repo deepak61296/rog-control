@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: #0a0a0f;
+  color: #e0e0e0;
+  overflow: hidden;
+}
+
+/* Glassmorphism utilities */
+.glass {
+  background: rgba(0, 17, 8, 0.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 170, 68, 0.18);
+}
+
+.glass-strong {
+  background: rgba(0, 10, 5, 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(0, 170, 68, 0.25);
+}
+
+/* Neon glow rings */
+.glow-green {
+  box-shadow:
+    0 0 10px rgba(0, 255, 0, 0.1),
+    0 0 30px rgba(0, 255, 0, 0.04),
+    inset 0 0 10px rgba(0, 255, 0, 0.03);
+}
+
+.glow-cyan {
+  box-shadow:
+    0 0 10px rgba(0, 255, 255, 0.1),
+    0 0 30px rgba(0, 255, 255, 0.04),
+    inset 0 0 10px rgba(0, 255, 255, 0.03);
+}
+
+.glow-pink {
+  box-shadow:
+    0 0 10px rgba(255, 0, 255, 0.1),
+    0 0 30px rgba(255, 0, 255, 0.04),
+    inset 0 0 10px rgba(255, 0, 255, 0.03);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 0, 0.2);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 0, 0.4);
+}
+
+/* Recharts overrides */
+.recharts-default-tooltip {
+  background: rgba(0, 10, 5, 0.9) !important;
+  border: 1px solid rgba(0, 255, 0, 0.3) !important;
+  border-radius: 8px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
+.recharts-tooltip-label {
+  color: #00ff00 !important;
+}
+.recharts-tooltip-item {
+  color: #00ff88 !important;
+}
+
+/* Fade-in animation utility */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
