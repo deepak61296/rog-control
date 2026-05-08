@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && yarn build:electron && electron .\"",
-    "electron:build": "yarn build && yarn build:electron && electron-builder"
+    "electron:build": "yarn build && yarn build:electron && electron-builder",
+    "start": "electron ."
   },
   "dependencies": {
     "framer-motion": "^11.0.0",

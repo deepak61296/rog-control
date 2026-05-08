@@ -28,6 +28,26 @@ from src.core.fans import FanController, FanCurve
 HOST = "127.0.0.1"
 PORT = 9876
 
+def _kill_old_server():
+    """Kill any process already using PORT before we bind."""
+    import subprocess, time
+    try:
+        result = subprocess.run(
+            ["ss", "-tlnp"], capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if f":{PORT}" in line:
+                # extract pid=xxx
+                if "pid=" in line:
+                    pid = line.split("pid=")[1].split(",")[0].strip()
+                    if pid:
+                        print(f"Killing old server (PID {pid}) on port {PORT}...")
+                        subprocess.run(["kill", "-9", pid])
+                        time.sleep(1)
+                        break
+    except Exception as e:
+        print(f"Warning: couldn't check for old server: {e}")
+
 
 def _serialize_snapshot(snapshot: SystemSnapshot) -> dict:
     data = asdict(snapshot)
@@ -177,6 +197,7 @@ class RogServer:
 
 
 async def main():
+    _kill_old_server()
     server = RogServer()
     stop = asyncio.Future()
 
