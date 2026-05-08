@@ -8,29 +8,46 @@ export function useTelemetry() {
   useEffect(() => {
     const api = window.rogAPI;
     if (!api) {
-      // Browser dev mode: poll the Python server directly via WebSocket
+      // Browser/dev mode: poll Python server directly
       const ws = new WebSocket('ws://127.0.0.1:9876');
-      ws.onmessage = (e) => {
+
+      ws.onopen = () => {
+        setBackendStatus({ connected: true });
+      };
+
+      ws.onmessage = (e: MessageEvent) => {
         try {
-          const data = JSON.parse(e.data);
+          const data = JSON.parse(e.data as string);
           if (data.type === 'telemetry') setTelemetry(data);
         } catch {}
       };
-      ws.onopen = () => setBackendStatus({ connected: true });
-      ws.onclose = () => setBackendStatus({ connected: false });
-      return () => ws.close();
+
+      ws.onclose = () => {
+        setBackendStatus({ connected: false });
+      };
+
+      return () => {
+        ws.close();
+      };
     }
 
-    api.onTelemetry((data) => {
+    // Electron mode: use IPC
+    const onTelemetry = (data: any) => {
       if (data.type === 'telemetry') setTelemetry(data);
-    });
-
-    api.onBackendStatus((status) => {
+    };
+    const onStatus = (status: any) => {
       setBackendStatus(status);
-    });
+    };
 
-    api.getBackendStatus().then((connected) => {
+    api.onTelemetry(onTelemetry);
+    api.onBackendStatus(onStatus);
+
+    api.getBackendStatus().then((connected: boolean) => {
       setBackendStatus({ connected });
     });
+
+    return () => {
+      // Cleanup handled by ipcRenderer
+    };
   }, []);
 }
