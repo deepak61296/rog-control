@@ -6,6 +6,7 @@ export function useTelemetry() {
   const setBackendStatus = useDashboardStore((s) => s.setBackendStatus);
 
   useEffect(() => {
+    console.log('[useTelemetry] hook running, rogAPI:', !!window.rogAPI);
     const api = window.rogAPI;
     if (!api) {
       // Browser/dev mode: poll Python server directly

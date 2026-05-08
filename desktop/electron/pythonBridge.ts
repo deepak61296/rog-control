@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import path from 'path';
 
-const SERVER_SCRIPT = path.join(__dirname, '../../src/server.py');
+const SERVER_SCRIPT = path.join(__dirname, '../../../src/server.py');
 const WS_URL = 'ws://127.0.0.1:9876';
 
 export class PythonBridge extends EventEmitter {
