@@ -23,6 +23,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
+        sys.exit(main())
     except KeyboardInterrupt:
         sys.exit(130)

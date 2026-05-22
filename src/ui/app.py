@@ -24,6 +24,7 @@ from src.core.cpu import CPUController
 from src.core.fans import FanController
 from src.core.power import PowerController, PowerInfo
 from src.core.sensors import Capability, SystemSnapshot, SensorReader
+from src.ui.formatters import fmt_temp, fmt_power, fmt_freq, fmt_rpm, fmt_percent, sparkline, limit_str
 
 
 @dataclass
@@ -36,7 +37,7 @@ class AppState:
     message_style: str = "cyan"
     message_time: float = field(default_factory=time.time)
     active_menu: Optional[str] = None
-    running: bool = True
+    pending_confirm: Optional[str] = None
     cpu_temp_history: list[float] = field(default_factory=list)
     amd_gpu_temp_history: list[float] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -80,6 +81,8 @@ class DataCollector:
         self.power = PowerController()
         self.fans = FanController()
         self.lock = threading.Lock()
+        self._running = threading.Event()
+        self._running.set()
         self._threads: list[threading.Thread] = []
 
     def start(self) -> None:
@@ -92,7 +95,7 @@ class DataCollector:
             thread.start()
 
     def stop(self) -> None:
-        self.state.running = False
+        self._running.clear()
         for thread in self._threads:
             thread.join(timeout=0.2)
 
@@ -103,7 +106,7 @@ class DataCollector:
             self.state.errors = [message, *[item for item in self.state.errors if item != message]][:5]
 
     def _collect_sensors(self) -> None:
-        while self.state.running:
+        while self._running.is_set():
             snapshot = self.sensors.get_snapshot()
             with self.lock:
                 self.state.snapshot = snapshot
@@ -117,7 +120,7 @@ class DataCollector:
             time.sleep(1.0)
 
     def _collect_power(self) -> None:
-        while self.state.running:
+        while self._running.is_set():
             info = self.power.get_power_info()
             with self.lock:
                 self.state.power_info = info
@@ -126,7 +129,7 @@ class DataCollector:
             time.sleep(2.0)
 
     def _collect_fan_status(self) -> None:
-        while self.state.running:
+        while self._running.is_set():
             profile, profile_error = self.fans.get_profile()
             curve_enabled, curve_error = self.fans.get_fan_curve_enabled()
             with self.lock:
@@ -155,60 +158,14 @@ class DataCollector:
                 message_style=self.state.message_style,
                 message_time=self.state.message_time,
                 active_menu=self.state.active_menu,
-                running=self.state.running,
+                pending_confirm=self.state.pending_confirm,
                 cpu_temp_history=list(self.state.cpu_temp_history),
                 amd_gpu_temp_history=list(self.state.amd_gpu_temp_history),
                 errors=list(self.state.errors),
             )
 
 
-def _sparkline(values: list[float], width: int = 12) -> str:
-    if len(values) < 2:
-        return " " * width
-    chars = "▁▂▃▄▅▆▇█"
-    recent = values[-width:]
-    low = min(recent)
-    high = max(recent)
-    span = high - low or 1.0
-    return "".join(chars[min(7, int(((value - low) / span) * 7))] for value in recent).rjust(width)
 
-
-def _fmt_temp(value: Optional[float]) -> str:
-    if value is None:
-        return "---"
-    if value >= 85:
-        return str(value) + " C"
-    if value >= 70:
-        return str(value) + " C"
-    return str(value) + " C"
-
-
-def _fmt_power(value: Optional[float]) -> str:
-    if value is None:
-        return "---"
-    return f"{value:.1f} W"
-
-
-def _fmt_freq(value: Optional[int]) -> str:
-    if value is None:
-        return "---"
-    return f"{value / 1000:.2f} GHz"
-
-
-def _fmt_rpm(value: Optional[int]) -> str:
-    if value is None:
-        return "---"
-    return f"{value} RPM"
-
-
-def _fmt_percent(value: Optional[int]) -> str:
-    if value is None:
-        return "---"
-    if value >= 95:
-        return str(value) + "%"
-    if value >= 80:
-        return str(value) + "%"
-    return str(value) + "%"
 
 
 def _capability_badge(capability: Capability, label: str) -> Text:
@@ -226,7 +183,6 @@ class RogControlApp:
         "3": ("Balanced cap", 3500000),
         "4": ("Performance cap", 4000000),
         "5": ("High cap", 4500000),
-        "6": ("Hardware max", 5263000),
     }
     POWER_PRESETS = {
         "1": ("Silent", "silent"),
@@ -235,15 +191,13 @@ class RogControlApp:
         "4": ("Balanced", "balanced"),
         "5": ("Performance", "performance"),
         "6": ("High", "high"),
-        "7": ("Maximum", "max"),
     }
     FAN_PROFILES = {"1": "Performance", "2": "Balanced", "3": "Quiet"}
-    FAN_CURVES = {"1": "silent", "2": "quiet", "3": "balanced", "4": "aggressive", "5": "max"}
+    FAN_CURVES = {"1": "aggressive", "2": "max"}
     QUICK_PRESETS = {
-        "1": ("Quiet Work", 2500000, "silent", "Quiet", "quiet"),
-        "2": ("Cool Daily", 3000000, "cool", "Balanced", "balanced"),
-        "3": ("Balanced", 3500000, "balanced", "Balanced", "balanced"),
-        "4": ("Heavy Load", 4500000, "performance", "Performance", "aggressive"),
+        "1": ("Default", 2500000, "silent", "Balanced", "aggressive"),
+        "2": ("Balanced", 3500000, "balanced", "Balanced", "aggressive"),
+        "3": ("Performance", 4000000, "performance", "Performance", "max"),
     }
 
     def __init__(self):
@@ -253,23 +207,41 @@ class RogControlApp:
 
     def run(self) -> int:
         self.collector.start()
-        with TerminalInput() as keyboard, Live(self.render(), console=self.console, screen=True, auto_refresh=False) as live:
-            while self.state.running:
-                key = keyboard.read_key(timeout=0.15)
-                if key:
-                    self.handle_key(key)
-                live.update(self.render(), refresh=True)
-        self.collector.stop()
+        try:
+            with TerminalInput() as keyboard, Live(self.render(), console=self.console, screen=True, auto_refresh=False) as live:
+                while self.collector._running.is_set():
+                    key = keyboard.read_key(timeout=0.15)
+                    if key:
+                        self.handle_key(key)
+                    live.update(self.render(), refresh=True)
+        finally:
+            self.collector.stop()
         return 0
 
     def handle_key(self, key: str) -> None:
         normalized = key.lower()
+        if normalized == "\x1b":
+            self.state.pending_confirm = None
+            if self.state.active_menu:
+                self.state.active_menu = None
+            else:
+                self.collector._running.clear()
+            return
+
+        if self.state.pending_confirm:
+            if normalized == "y":
+                self._execute_pending()
+            else:
+                self.collector.update_message("Cancelled.", "yellow")
+                self.state.pending_confirm = None
+            return
+
         if self.state.active_menu:
             self._handle_menu_input(normalized)
             return
 
         if normalized == "q":
-            self.state.running = False
+            self.collector._running.clear()
         elif normalized == "1":
             self.state.active_menu = "cpu"
         elif normalized == "2":
@@ -280,8 +252,6 @@ class RogControlApp:
             self.state.active_menu = "fan_curve"
         elif normalized == "5":
             self.state.active_menu = "quick"
-        elif normalized == "r":
-            self.collector.update_message("Refresh loop is live; telemetry updates automatically.", "green")
         elif normalized == "h":
             self.state.active_menu = "help"
 
@@ -304,6 +274,34 @@ class RogControlApp:
         elif active == "help":
             self.state.active_menu = None
 
+    def _execute_pending(self) -> None:
+        action = self.state.pending_confirm
+        self.state.pending_confirm = None
+        if action == "max_fan":
+            success, message = self.collector.fans.set_fan_curve_preset("max")
+            if success:
+                success, message = self.collector.fans.enable_custom_curves(enable=True)
+            self.collector.update_message(message, "green" if success else "red")
+        elif action == "perf_power":
+            success, message = self.collector.power.set_preset("performance")
+            self.collector.update_message(message, "green" if success else "red")
+        elif action == "quick_perf":
+            preset = self.QUICK_PRESETS["3"]
+            _, freq, power_preset, fan_profile, curve_name = preset
+            actions = [
+                self.collector.cpu.set_max_freq_all(freq),
+                self.collector.power.set_preset(power_preset),
+                self.collector.fans.set_profile(fan_profile),
+                self.collector.fans.set_fan_curve_preset(curve_name),
+                self.collector.fans.enable_custom_curves(enable=True),
+            ]
+            failures = [msg for s, msg in actions if not s]
+            if failures:
+                self.collector.update_message(failures[0], "red")
+            else:
+                self.collector.update_message("Applied preset: Performance", "green")
+        self.state.active_menu = None
+
     def _handle_cpu_menu(self, key: str) -> None:
         preset = self.CPU_PRESETS.get(key)
         if preset is None:
@@ -318,6 +316,10 @@ class RogControlApp:
         if preset is None:
             return
         _, name = preset
+        if name == "performance":
+            self.state.pending_confirm = "perf_power"
+            self.collector.update_message("Apply 55W Performance preset? (y/N)", "yellow")
+            return
         success, message = self.collector.power.set_preset(name)
         self.collector.update_message(message, "green" if success else "red")
         self.state.active_menu = None
@@ -342,6 +344,12 @@ class RogControlApp:
         preset = self.FAN_CURVES.get(key)
         if preset is None:
             return
+
+        if preset == "max":
+            self.state.pending_confirm = "max_fan"
+            self.collector.update_message("Set fans to 100%? (y/N)", "yellow")
+            return
+
         success, message = self.collector.fans.set_fan_curve_preset(preset)
         if success:
             success, message = self.collector.fans.enable_custom_curves(enable=True)
@@ -352,7 +360,13 @@ class RogControlApp:
         preset = self.QUICK_PRESETS.get(key)
         if preset is None:
             return
-        _, freq, power_preset, fan_profile, curve_name = preset
+
+        name, freq, power_preset, fan_profile, curve_name = preset
+        if name == "Performance":
+            self.state.pending_confirm = "quick_perf"
+            self.collector.update_message("Apply Performance preset (55W + max fans)? (y/N)", "yellow")
+            return
+
         actions = [
             self.collector.cpu.set_max_freq_all(freq),
             self.collector.power.set_preset(power_preset),
@@ -364,7 +378,7 @@ class RogControlApp:
         if failures:
             self.collector.update_message(failures[0], "red")
         else:
-            self.collector.update_message(f"Applied preset: {preset[0]}", "green")
+            self.collector.update_message(f"Applied preset: {name}", "green")
         self.state.active_menu = None
 
     def render(self) -> RenderableType:
@@ -409,11 +423,11 @@ class RogControlApp:
     def _render_cpu_panel(self, state: AppState) -> Panel:
         cpu = state.snapshot.cpu
         rows = [
-            ("Temperature", _fmt_temp(cpu.temp_c)),
-            ("Current", _fmt_freq(cpu.current_freq_mhz)),
-            ("Limit", _fmt_freq(cpu.max_freq_mhz)),
+            ("Temperature", fmt_temp(cpu.temp_c)),
+            ("Current", fmt_freq(cpu.current_freq_mhz)),
+            ("Limit", fmt_freq(cpu.max_freq_mhz)),
             ("Governor", cpu.governor or "Unavailable"),
-            ("Trend", _sparkline(state.cpu_temp_history)),
+            ("Trend", sparkline(state.cpu_temp_history)),
         ]
         return self._metric_table("CPU", rows)
 
@@ -423,11 +437,11 @@ class RogControlApp:
         if state.custom_curve_enabled is None:
             fan_status = "Unavailable"
         rows = [
-            ("CPU Fan", _fmt_rpm(cooling.cpu_fan_rpm)),
-            ("GPU Fan", _fmt_rpm(cooling.gpu_fan_rpm)),
+            ("CPU Fan", fmt_rpm(cooling.cpu_fan_rpm)),
+            ("GPU Fan", fmt_rpm(cooling.gpu_fan_rpm)),
             ("Profile", state.fan_profile or "Unavailable"),
             ("Custom Curve", fan_status),
-            ("NVMe Temp", _fmt_temp(state.snapshot.nvme_temp_c)),
+            ("NVMe Temp", fmt_temp(state.snapshot.nvme_temp_c)),
         ]
         capability = self.collector.fans.capability
         details = self.collector.fans.last_error or capability.reason
@@ -440,10 +454,10 @@ class RogControlApp:
         gpu = state.snapshot.amd_gpu
         capability = state.snapshot.capabilities.get("amd_hwmon", Capability(False, "AMD GPU telemetry unavailable"))
         rows = [
-            ("Temperature", _fmt_temp(gpu.temp_c)),
+            ("Temperature", fmt_temp(gpu.temp_c)),
             ("Clock", f"{gpu.clock_mhz} MHz" if gpu.clock_mhz is not None else "Unavailable"),
-            ("Power", _fmt_power(gpu.power_w)),
-            ("Trend", _sparkline(state.amd_gpu_temp_history)),
+            ("Power", fmt_power(gpu.power_w)),
+            ("Trend", sparkline(state.amd_gpu_temp_history)),
         ]
         panel = self._metric_table("AMD iGPU", rows)
         if capability.available:
@@ -454,10 +468,10 @@ class RogControlApp:
         gpu = state.snapshot.nvidia_gpu
         capability = state.snapshot.capabilities.get("nvidia", Capability(False, "NVIDIA telemetry unavailable"))
         rows = [
-            ("Temperature", _fmt_temp(gpu.temp_c)),
+            ("Temperature", fmt_temp(gpu.temp_c)),
             ("Clock", f"{gpu.clock_mhz} MHz" if gpu.clock_mhz is not None else "Unavailable"),
-            ("Power", _fmt_power(gpu.power_w)),
-            ("Utilization", _fmt_percent(gpu.util_percent)),
+            ("Power", fmt_power(gpu.power_w)),
+            ("Utilization", fmt_percent(gpu.util_percent)),
             ("VRAM", f"{gpu.vram_used_mb}/{gpu.vram_total_mb} MB" if gpu.vram_used_mb is not None and gpu.vram_total_mb is not None else "Unavailable"),
         ]
         panel = self._metric_table("NVIDIA dGPU", rows)
@@ -468,10 +482,10 @@ class RogControlApp:
     def _render_power_panel(self, state: AppState) -> Panel:
         info = state.power_info
         rows = [
-            ("STAPM", self._limit_value(info.stapm_value, info.stapm_limit)),
-            ("Fast PPT", self._limit_value(info.fast_value, info.fast_limit)),
-            ("Slow PPT", self._limit_value(info.slow_value, info.slow_limit)),
-            ("Thermal", self._limit_value(info.tctl_value, info.tctl_limit, unit="C")),
+            ("STAPM", limit_str(info.stapm_value, info.stapm_limit)),
+            ("Fast PPT", limit_str(info.fast_value, info.fast_limit)),
+            ("Slow PPT", limit_str(info.slow_value, info.slow_limit)),
+            ("Thermal", limit_str(info.tctl_value, info.tctl_limit, unit="C")),
         ]
         panel = self._metric_table("Power", rows)
         capability = self.collector.power.capability
@@ -484,10 +498,9 @@ class RogControlApp:
         battery = state.snapshot.battery
         capability = state.snapshot.capabilities.get("battery", Capability(False, "Battery unavailable"))
         rows = [
-            ("Charge", _fmt_percent(battery.percent)),
+            ("Charge", fmt_percent(battery.percent)),
             ("Status", battery.status or "Unavailable"),
-            ("Power", _fmt_power(battery.power_w)),
-            ("Alerts", state.errors[0] if state.errors else "None"),
+            ("Power", fmt_power(battery.power_w)),
         ]
         panel = self._metric_table("Battery and Status", rows)
         if capability.available:
@@ -495,11 +508,18 @@ class RogControlApp:
         return Panel(Group(panel.renderable, Text(capability.reason, style="yellow")), title="Battery and Status", border_style="yellow")
 
     def _render_footer(self, state: AppState) -> Panel:
+        cpu = state.snapshot.cpu
+        info = state.power_info
+        cpu_status = fmt_freq(cpu.max_freq_mhz) if cpu.max_freq_mhz is not None else "---"
+        power_status = f"{info.stapm_limit:.0f}W" if info.stapm_limit is not None else "---"
+        status_line = Text.from_markup(
+            f"[dim]CPU cap:[/] {cpu_status}  [dim]Power:[/] {power_status}  [dim]Fan:[/] {state.fan_profile or '---'}"
+        )
         help_text = Text.from_markup(
-            "[bold green]1[/] CPU  [bold green]2[/] Power  [bold green]3[/] Fan  [bold green]4[/] Curve  [bold green]5[/] Quick  [bold green]h[/] Help  [bold green]q[/] Quit"
+            "[bold green]1[/] CPU  [bold green]2[/] Power  [bold green]3[/] Profile  [bold green]4[/] Fan Curve  [bold green]5[/] Quick  [bold green]h[/] Help  [bold green]q[/] Quit"
         )
         status = Text(state.message, style=state.message_style)
-        return Panel(Group(help_text, status), border_style="green")
+        return Panel(Group(help_text, status_line, status), border_style="green")
 
     def _render_menu(self, state: AppState) -> Panel:
         renderers = {
@@ -570,27 +590,16 @@ class RogControlApp:
 
     def _render_compact(self, state: AppState) -> Panel:
         lines = [
-            f"CPU: {_fmt_temp(state.snapshot.cpu.temp_c)} | {_fmt_freq(state.snapshot.cpu.current_freq_mhz)}",
-            f"AMD iGPU: {_fmt_temp(state.snapshot.amd_gpu.temp_c)} | {_fmt_power(state.snapshot.amd_gpu.power_w)}",
-            f"NVIDIA: {_fmt_temp(state.snapshot.nvidia_gpu.temp_c)} | {_fmt_percent(state.snapshot.nvidia_gpu.util_percent)}",
-            f"Fans: {_fmt_rpm(state.snapshot.cooling.cpu_fan_rpm)} / {_fmt_rpm(state.snapshot.cooling.gpu_fan_rpm)}",
-            f"Battery: {_fmt_percent(state.snapshot.battery.percent)} {state.snapshot.battery.status or ''}",
+            f"CPU: {fmt_temp(state.snapshot.cpu.temp_c)} | {fmt_freq(state.snapshot.cpu.current_freq_mhz)}",
+            f"AMD iGPU: {fmt_temp(state.snapshot.amd_gpu.temp_c)} | {fmt_power(state.snapshot.amd_gpu.power_w)}",
+            f"NVIDIA: {fmt_temp(state.snapshot.nvidia_gpu.temp_c)} | {fmt_percent(state.snapshot.nvidia_gpu.util_percent)}",
+            f"Fans: {fmt_rpm(state.snapshot.cooling.cpu_fan_rpm)} / {fmt_rpm(state.snapshot.cooling.gpu_fan_rpm)}",
+            f"Battery: {fmt_percent(state.snapshot.battery.percent)} {state.snapshot.battery.status or ''}",
             state.message,
-            "Widen the terminal for the full dashboard.",
+            "",
+            "Keys: [1]CPU [2]Power [3]Profile [4]Curve [5]Quick [h]Help [q]Quit",
         ]
         return Panel("\n".join(lines), title="ROG Control", border_style="cyan")
-
-    @staticmethod
-    def _limit_value(value: Optional[float], limit: Optional[float], unit: str = "W") -> str:
-        if value is None and limit is None:
-            return "Unavailable"
-        if unit == "C":
-            left = f"{value:.1f} C" if value is not None else "Unavailable"
-            right = f"{limit:.0f} C" if limit is not None else "Unavailable"
-        else:
-            left = f"{value:.1f} {unit}" if value is not None else "Unavailable"
-            right = f"{limit:.1f} {unit}" if limit is not None else "Unavailable"
-        return f"{left} / {right}"
 
     @staticmethod
     def _backend_badge(capability: Capability, last_error: str, label: str) -> Text:

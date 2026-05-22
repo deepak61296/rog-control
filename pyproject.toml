@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rog-control"
+version = "0.2.0"
+description = "Terminal UI for monitoring and controlling ASUS ROG laptops"
+requires-python = ">=3.10"
+dependencies = [
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+rog = "src.main:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

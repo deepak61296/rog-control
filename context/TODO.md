@@ -1,50 +1,39 @@
 # ROG Control - Development TODO
 
-## Current Sprint
+## Current Status
+v0.2.0 -- Minimal, safe, bug-free TUI. All dangerous presets removed. Confirmation on risky actions.
 
-### High Priority
-- [x] Basic TUI with status display
-- [x] CPU frequency control
-- [x] Power limit control (basic)
-- [x] Fan profile switching
-- [x] **Rich library integration for better UI**
-- [x] **Real-time monitoring with live updates**
-- [x] **GPU stats display (power, temp, clock)**
-- [x] **Advanced RyzenAdj controls**
-- [x] **Sparkline history graphs**
-- [x] **Non-blocking keyboard input**
-- [x] **Background threaded data collection**
-- [x] **Passwordless sudo for ryzenadj**
+## Completed
+- [x] Basic TUI with live status display
+- [x] CPU frequency control (max 4.0 GHz)
+- [x] Power limit control via RyzenAdj (max 55W)
+- [x] Fan curve control (Aggressive / Max)
+- [x] ASUS profile switching
+- [x] Live telemetry with background threads
+- [x] AMD iGPU + NVIDIA dGPU read-only telemetry
+- [x] Sparkline history graphs
+- [x] Non-blocking keyboard input
+- [x] Compact mode for narrow terminals
+- [x] Confirmation dialogs for risky actions
+- [x] Esc key to close menus / quit
+- [x] Status bar showing current CPU cap + power limit
+- [x] pip installable (`pip install -e .`) with `rog` command
 
-### Medium Priority
+## Bugs Fixed
+- [x] hwmon paths auto-detection (explicit fallback)
+- [x] `_fmt_temp` and `_fmt_percent` dead conditionals removed
+- [x] `raise SystemExit` replaced with `sys.exit()`
+- [x] Thread race on state.running switched to threading.Event
+- [x] Duplicate formatters consolidated into formatters.py
+
+## Low Priority
 - [ ] Configuration file for saving presets
 - [ ] Per-core frequency display
-- [ ] Battery stats and charge limit control
-- [ ] Custom preset creation and saving
-- [ ] Keyboard shortcuts help panel
-- [ ] VRM current limits control
+- [ ] Custom preset creation
+- [ ] VRM current limit controls
 - [ ] Temperature limit control
-
-### Low Priority
-- [ ] System tray indicator (separate GTK app)
-- [ ] Keyboard RGB control
 - [ ] Auto-profile switching based on workload
 - [ ] Logging and history
-- [ ] Export/import settings
-
-## Bugs
-- [ ] hwmon paths may change between boots (need auto-detection)
 
 ## Technical Debt
-- [ ] Add proper error handling throughout
-- [ ] Add type hints to all functions
 - [ ] Write unit tests for core modules
-- [ ] Add logging
-
-## Ideas for Future
-- Curve optimizer integration
-- Undervolting support (if unlocked)
-- Benchmark mode with stats recording
-- Temperature graphs over time
-- Discord/webhook notifications for thermal events
-- Scheduled profile switching

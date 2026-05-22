@@ -1,105 +1,84 @@
 # ROG Control - AI Agent Context
 
 ## Project Overview
-ROG Control is a terminal UI (TUI) application for controlling thermals, fans, and power management on ASUS ROG Zephyrus G14 (2023) laptops running Linux.
+ROG Control is a terminal UI for monitoring and safely controlling fans, CPU frequency, and power limits on ASUS ROG laptops running Linux.
 
 ## Target Device
 - **Model:** ASUS ROG Zephyrus G14 (2023)
 - **CPU:** AMD Ryzen 7040 series (Phoenix Point)
-- **GPU:** AMD Radeon integrated + NVIDIA discrete
-- **OS:** Ubuntu 22.04
+- **OS:** Ubuntu 22.04+
 
 ## Tech Stack
 - **Language:** Python 3.10+
-- **TUI Library:** Rich (for beautiful terminal UI)
+- **TUI:** Rich
 - **System Interface:** sysfs, asusctl, ryzenadj
 
 ## Project Structure
 ```
 rog-control/
-├── CLAUDE.md              # This file - AI context
+├── CLAUDE.md              # This file
 ├── README.md              # User documentation
-├── .gitignore
-├── requirements.txt       # Python dependencies
+├── pyproject.toml         # Pip install config (rog command)
+├── requirements.txt       # Dependencies
 ├── src/
 │   ├── __init__.py
 │   ├── main.py           # Entry point
-│   ├── ui/
-│   │   ├── __init__.py
-│   │   ├── app.py        # Main TUI application
-│   │   ├── widgets.py    # Custom UI components
-│   │   └── themes.py     # Color themes
 │   ├── core/
-│   │   ├── __init__.py
 │   │   ├── cpu.py        # CPU frequency control
 │   │   ├── power.py      # RyzenAdj power management
 │   │   ├── fans.py       # Fan control via asusctl
-│   │   ├── sensors.py    # Temperature/power readings
-│   │   └── gpu.py        # GPU control
+│   │   └── sensors.py    # Temperature/power readings
+│   ├── ui/
+│   │   ├── app.py        # Main TUI application
+│   │   ├── formatters.py # Formatting helpers
+│   │   └── theme.py      # Color themes
 │   └── utils/
-│       ├── __init__.py
-│       ├── config.py     # User configuration
-│       └── helpers.py    # Utility functions
+│       └── __init__.py
 ├── context/
-│   ├── ARCHITECTURE.md   # System architecture
-│   ├── RYZENADJ.md       # RyzenAdj options reference
-│   ├── SYSFS_PATHS.md    # Linux sysfs paths
-│   └── TODO.md           # Current tasks
+│   ├── ARCHITECTURE.md
+│   ├── RYZENADJ.md
+│   ├── SYSFS_PATHS.md
+│   └── TODO.md
 └── docs/
-    └── INSTALL.md        # Installation guide
 ```
 
 ## Key System Paths
 ```python
-# Fan control
 FAN1_PATH = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon6/fan1_input"
 FAN2_PATH = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon6/fan2_input"
 THERMAL_POLICY = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
-
-# CPU frequency
-CPU_FREQ_PATH = "/sys/devices/system/cpu/cpu{n}/cpufreq/"
 SCALING_MAX = "scaling_max_freq"
-SCALING_CUR = "scaling_cur_freq"
-CPUINFO_MAX = "cpuinfo_max_freq"  # 5263000 (5.26 GHz)
-
-# AMD GPU (integrated)
-AMDGPU_PATH = "/sys/class/drm/card1/device/"
 ```
 
 ## External Tools
-1. **asusctl** - ASUS laptop control (fans, profiles, RGB)
+1. **asusctl** - ASUS laptop control (fans, profiles)
 2. **ryzenadj** - AMD Ryzen power management
-3. **sensors** - lm-sensors for temperature readings
 
 ## RyzenAdj Key Parameters
-All values in milliwatts (mW) or milliamps (mA):
-- `--stapm-limit` - Sustained power limit
+All values in milliwatts:
+- `--stapm-limit` - Sustained power limit (max 55000)
 - `--fast-limit` - Short burst power limit
 - `--slow-limit` - Average power limit
 - `--tctl-temp` - Temperature limit (°C)
-- `--vrm-current` - VRM current limit
-- `--vrmmax-current` - VRM max current
-- `--max-gfxclk` - Max iGPU clock (MHz)
-- `--min-gfxclk` - Min iGPU clock (MHz)
 
 ## Design Principles
-1. **Real-time updates** - Show live stats with smooth animations
-2. **Safe defaults** - Never allow dangerous settings without warning
-3. **Keyboard-driven** - Full keyboard navigation, vim-style where possible
-4. **Beautiful UI** - Use Rich library for colors, tables, progress bars
-5. **Modular** - Each subsystem in its own module
+1. **Minimal and safe** - No dangerous presets, confirmations on risky actions
+2. **Fans always high** - Aggressive fan curve is default for all presets
+3. **Safe max values** - CPU capped at 4.0 GHz, power capped at 55W
+4. **Real-time updates** - Live telemetry updates every 1-2s
+5. **Keyboard-driven** - Full keyboard navigation
 
-## Current Systemd Services
-- `cpu-freq-limit.service` - Caps CPU at 3.0 GHz on boot
-- `ryzenadj.service` - Sets 45W power limit on boot
-- `asusd.service` - Manages fan profiles
+## Presets
+- CPU: Silent(2.5) / Cool(3.0) / Balanced(3.5) / Performance(4.0) GHz
+- Power: Silent(15W) / Eco(25W) / Cool(35W) / Balanced(45W) / Performance(55W)
+- Fan curves: Aggressive / Max (100%)
+- Quick: Default(2.5GHz+15W+Aggressive) / Balanced(3.5GHz+35W+Aggressive) / Performance(4.0GHz+55W+Max)
 
-## Coding Standards
-- Use type hints
-- Docstrings for all public functions
-- Handle errors gracefully with user-friendly messages
-- No hardcoded passwords or secrets
-- Use constants for magic numbers
+## Safety Guards
+- No 80W or 5.26 GHz presets
+- Confirmations on Performance power, Max fans
+- Esc closes menus or exits app
+- status bar shows current CPU cap + power limit
 
 ## Author
 Deepak
