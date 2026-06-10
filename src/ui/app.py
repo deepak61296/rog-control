@@ -119,8 +119,10 @@ class CPUDashboard(Static):
             yield Label("CPU", classes="card-title")
             self.temp = MetricRow("Temperature")
             yield self.temp
-            self.freq = MetricRow("Frequency")
+            self.freq = MetricRow("Current Freq")
             yield self.freq
+            self.limit = MetricRow("Limit Freq")
+            yield self.limit
             self.power = MetricRow("Package Power")
             yield self.power
             self.governor = MetricRow("Governor")
@@ -135,6 +137,8 @@ class CPUDashboard(Static):
         self.temp.value = f"{temp:.0f} °C" if temp is not None else "---"
         freq = cpu.current_freq_mhz
         self.freq.value = f"{freq / 1000:.2f} GHz" if freq is not None else "---"
+        limit = cpu.max_freq_mhz
+        self.limit.value = f"{limit / 1000:.2f} GHz" if limit is not None else "---"
         
         power = state.power_info.stapm_value
         self.power.value = f"{power:.1f} W" if power is not None else "---"
@@ -380,6 +384,8 @@ class RogControlApp(App[None]):
         Binding("3", "shortcut_3", "Profile"),
         Binding("4", "shortcut_4", "Curve"),
         Binding("5", "shortcut_5", "Quick"),
+        Binding("b", "back", "Back", show=False),
+        Binding("escape", "back", "Back", show=False),
         Binding("ctrl+c", "quit_app", "Quit"),
     ]
 
@@ -494,6 +500,18 @@ class RogControlApp(App[None]):
     def action_shortcut_3(self) -> None: self._handle_shortcut("3")
     def action_shortcut_4(self) -> None: self._handle_shortcut("4")
     def action_shortcut_5(self) -> None: self._handle_shortcut("5")
+
+    def action_back(self) -> None:
+        if self.active_control_panel is not None:
+            self.active_control_panel = None
+            self.notify("Controls unfocused. Press 1-5 to select a panel.", severity="information")
+        else:
+            self.exit()
+
+    @on(TabbedContent.TabActivated)
+    def _tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id and event.pane.id.startswith("tab-"):
+            self.active_control_panel = event.pane.id.replace("tab-", "")
 
     def _handle_shortcut(self, key: str) -> None:
         if self.active_control_panel is not None:

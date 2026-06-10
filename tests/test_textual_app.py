@@ -74,10 +74,6 @@ async def _run_keyboard_shortcut() -> None:
 
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.press("1")
-        await pilot.pause()
-        assert app.active_control_panel == "cpu"
-
-        await pilot.press("1")
         await pilot.pause(0.2)
         assert collector.cpu.calls == [2500000]
         assert app.active_control_panel == "cpu"

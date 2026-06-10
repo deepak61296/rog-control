@@ -139,7 +139,7 @@ class SensorReader:
                 total_delta = total - last_total
                 self._last_cpu_stat = (idle, total)
                 
-                if total_delta == 0:
+                if total_delta <= 0:
                     return 0.0
                 return 100.0 * (1.0 - idle_delta / total_delta)
         except Exception:
