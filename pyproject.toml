@@ -9,10 +9,20 @@ description = "Terminal UI for monitoring and controlling ASUS ROG laptops"
 requires-python = ">=3.10"
 dependencies = [
     "rich>=13.0.0",
+    "textual>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
 ]
 
 [project.scripts]
 rog = "src.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
 
 [tool.setuptools.packages.find]
 include = ["src*"]

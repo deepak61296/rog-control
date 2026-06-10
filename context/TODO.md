@@ -1,7 +1,9 @@
 # ROG Control - Development TODO
 
 ## Current Status
-v0.2.0 -- Minimal, safe, bug-free TUI. All dangerous presets removed. Confirmation on risky actions.
+v0.4.0 -- Textual migration for stable keyboard/mouse input, clickable controls,
+confirmation modals, scroll handling, disabled unsupported controls, and
+background hardware action execution.
 
 ## Completed
 - [x] Basic TUI with live status display
@@ -18,6 +20,27 @@ v0.2.0 -- Minimal, safe, bug-free TUI. All dangerous presets removed. Confirmati
 - [x] Esc key to close menus / quit
 - [x] Status bar showing current CPU cap + power limit
 - [x] pip installable (`pip install -e .`) with `rog` command
+- [x] Severity-coloured panel borders (temp/load driven)
+- [x] ASCII art block-character header logo
+- [x] Temperature gradient bars (per-cell colour interpolation)
+- [x] Colour-coded sparkline characters
+- [x] Distinct menu border colours per category
+- [x] Full compact mini-dashboard with bars and sparklines
+- [x] Thread-safety fix in current_state() (deep field copy)
+- [x] Capability.last_error removed from Capability model
+- [x] DataCollector extracted to src/ui/collector.py
+- [x] Menu rendering extracted to src/ui/menus.py
+- [x] Shared subprocess helper (src/core/process.py)
+- [x] hwmon paths cached (no re-scan every poll)
+- [x] Logging infrastructure (stderr, WARNING level)
+- [x] nvidia-smi locale fix (LC_ALL=C)
+- [x] Dead src/utils/ package removed
+- [x] Textual UI migration
+- [x] Clickable control buttons
+- [x] Scroll-wheel handled by the TUI framework
+- [x] Background worker for hardware write actions
+- [x] Disabled controls for unavailable backends
+- [x] Action-layer tests for control sequencing
 
 ## Bugs Fixed
 - [x] hwmon paths auto-detection (explicit fallback)
@@ -25,6 +48,14 @@ v0.2.0 -- Minimal, safe, bug-free TUI. All dangerous presets removed. Confirmati
 - [x] `raise SystemExit` replaced with `sys.exit()`
 - [x] Thread race on state.running switched to threading.Event
 - [x] Duplicate formatters consolidated into formatters.py
+- [x] Thread safety: current_state() now deep-copies mutable dataclass fields
+- [x] Capability.last_error removed — controllers now own error state
+- [x] Duplicated error recording replaced with _record_error() calls
+- [x] Subprocess timeout now kills child via process group
+- [x] Thread join timeout increased from 0.2s to 2.0s
+- [x] nvidia-smi output parsed with LC_ALL=C locale
+- [x] Raw terminal escape parsing removed from the main TUI
+- [x] Hardware commands no longer run directly inside key handlers
 
 ## Low Priority
 - [ ] Configuration file for saving presets
@@ -36,4 +67,5 @@ v0.2.0 -- Minimal, safe, bug-free TUI. All dangerous presets removed. Confirmati
 - [ ] Logging and history
 
 ## Technical Debt
-- [ ] Write unit tests for core modules
+- [ ] Add Textual pilot tests once Textual is available in the test environment
+- [ ] Broaden unit tests for core modules

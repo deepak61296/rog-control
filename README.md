@@ -1,6 +1,6 @@
 # ROG Control
 
-A Rich-based terminal dashboard for monitoring and safely controlling fans, CPU frequency, and power limits on ASUS ROG laptops running Linux.
+A Textual-based terminal dashboard for monitoring and safely controlling fans, CPU frequency, and power limits on ASUS ROG laptops running Linux.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -11,17 +11,18 @@ A Rich-based terminal dashboard for monitoring and safely controlling fans, CPU 
 - Live CPU, AMD iGPU, NVIDIA dGPU, fan, battery, and NVMe telemetry
 - CPU frequency presets, RyzenAdj power presets, ASUS profile switching, and fan curve presets
 - Capability-aware UI that keeps unsupported features visible but clearly marked unavailable
-- Professional Rich-based dashboard with compact fallback mode for narrow terminals
+- Textual UI with clickable controls, keyboard shortcuts, scrolling, and modal confirmations
+- Background action worker so hardware commands do not freeze the interface
 - Aggressive fan curves by default to keep the Zephyrus G14 cool
 
 ## Interface
 
 ```
-Header: backend health for CPU hwmon, AMD GPU, NVIDIA, RyzenAdj, and ASUSCtl
-Row 1: CPU and Cooling panels
-Row 2: AMD iGPU and NVIDIA dGPU panels
-Row 3: Power and Battery/Status panels
-Footer: action shortcuts, current CPU cap + power limit, and the latest result message
+Header: backend health for CPU hwmon, AMD GPU, NVIDIA, RyzenAdj, and asusctl
+Dashboard: CPU, Cooling, AMD iGPU, NVIDIA dGPU, Power, and Battery panels
+Controls: clickable CPU, power, fan profile, fan curve, and quick preset actions
+Status: current CPU cap, power limit, fan profile, latest result, and recent warnings
+Footer: keyboard shortcuts
 ```
 
 ## Requirements
@@ -30,7 +31,7 @@ Footer: action shortcuts, current CPU cap + power limit, and the latest result m
 - Python 3.10+
 - `asusctl` and `asusd` daemon
 - `ryzenadj` for AMD Ryzen power control
-- passwordless `sudo` for write actions
+- `sudo` access for CPU frequency and RyzenAdj write actions
 
 ## Installation
 
@@ -45,6 +46,11 @@ pip install -e .
 # Run from anywhere
 rog
 ```
+
+`rog` prompts for sudo once before the dashboard starts, then keeps that sudo
+session fresh while the app is open. This prevents password prompts from
+appearing inside the live terminal UI. Use `rog --no-sudo` to run monitor-only
+when you do not want to unlock write controls.
 
 ### Installing Dependencies
 
@@ -71,6 +77,12 @@ sudo make install
 rog
 ```
 
+Monitor-only mode:
+
+```bash
+rog --no-sudo
+```
+
 ### Keyboard Controls
 
 | Key | Action |
@@ -80,9 +92,12 @@ rog
 | `3` | ASUS fan profile |
 | `4` | Fan curve presets |
 | `5` | Quick combined presets |
-| `h` | Help |
-| `Esc` | Close menu / Quit |
+| `b` | Close controls |
+| `Esc` | Close controls / Quit |
 | `q` | Quit |
+
+Mouse clicks and scroll-wheel input are handled by Textual. Risky actions open
+a confirmation dialog before any hardware write is attempted.
 
 ## Quick Presets
 
@@ -114,10 +129,10 @@ All quick presets use aggressive fan curves to keep the system cool. Performance
 ## Safety Guards
 
 - No 80W power preset or 5.26 GHz CPU preset
-- Confirmation dialog before 55W Performance power
+- Confirmation dialog before 55W+ power presets
 - Confirmation dialog before Max (100%) fan mode
 - Confirmation before Performance quick preset
-- Esc closes menus or exits app
+- Esc closes controls or exits app
 - Status bar shows current CPU cap + power limit
 
 ## Author

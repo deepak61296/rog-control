@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
-import shutil
-import subprocess
 from typing import List, Optional
 
+from src.core.process import run_command
 from src.core.sensors import Capability
+
+logger = logging.getLogger(__name__)
 
 
 class CPUController:
@@ -34,11 +36,26 @@ class CPUController:
         self.last_error = ""
 
     def _detect_capability(self) -> Capability:
-        if not os.path.exists(f"{self.CPU_PATH}/cpu0/cpufreq/scaling_max_freq"):
+        path = f"{self.CPU_PATH}/cpu0/cpufreq/scaling_max_freq"
+        if not os.path.exists(path):
             return Capability(False, "CPU frequency scaling interface unavailable")
-        if not shutil.which("sudo"):
-            return Capability(False, "sudo not installed")
-        return Capability(True)
+
+        if os.access(path, os.W_OK):
+            return Capability(True)
+
+        success, output = run_command(["sudo", "-n", "true"], timeout=2)
+        if success:
+            return Capability(True)
+
+        reason = output or "passwordless sudo is not available"
+        return Capability(False, f"CPU frequency writes need root or passwordless sudo: {reason}")
+
+    @staticmethod
+    def _format_write_error(output: str) -> str:
+        cleaned = output.strip()
+        if "a password is required" in cleaned.lower() or "password is required" in cleaned.lower():
+            return "CPU frequency writes need root or passwordless sudo; interactive sudo prompts are disabled in the TUI"
+        return cleaned or "Unable to write CPU frequency limit"
 
     def _count_cores(self) -> int:
         return len(glob.glob(f"{self.CPU_PATH}/cpu[0-9]*"))
@@ -89,21 +106,27 @@ class CPUController:
             return []
 
     def _write_with_sudo(self, path: str, value: str) -> tuple[bool, str]:
+        success, output = run_command(
+            ["sudo", "-n", "tee", path],
+            timeout=10,
+            input_data=f"{value}\n",
+        )
+        if not success:
+            self.last_error = self._format_write_error(output)
+            return False, self.last_error
+        self.last_error = ""
+        return True, ""
+
+    def _write_sysfs(self, path: str, value: str) -> tuple[bool, str]:
         try:
-            result = subprocess.run(
-                ["sudo", "tee", path],
-                input=value.encode(),
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(f"{value}\n")
+        except PermissionError:
+            return self._write_with_sudo(path, value)
+        except OSError as exc:
             self.last_error = str(exc)
             return False, self.last_error
 
-        if result.returncode != 0:
-            self.last_error = (result.stderr or result.stdout or "").strip() or f"tee failed for {path}"
-            return False, self.last_error
         self.last_error = ""
         return True, ""
 
@@ -116,16 +139,9 @@ class CPUController:
         targets = cores if cores is not None else list(range(self.num_cores))
         for core in targets:
             path = f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_max_freq"
-            try:
-                with open(path, "w", encoding="utf-8") as handle:
-                    handle.write(str(freq_khz))
-            except PermissionError:
-                success, message = self._write_with_sudo(path, str(freq_khz))
-                if not success:
-                    return False, message
-            except OSError as exc:
-                self.last_error = str(exc)
-                return False, self.last_error
+            success, message = self._write_sysfs(path, str(freq_khz))
+            if not success:
+                return False, message
 
         return True, "CPU frequency limit updated"
 
@@ -137,7 +153,7 @@ class CPUController:
             return False, f"Governor not available: {governor}"
         for core in range(self.num_cores):
             path = f"{self.CPU_PATH}/cpu{core}/cpufreq/scaling_governor"
-            success, message = self._write_with_sudo(path, governor)
+            success, message = self._write_sysfs(path, governor)
             if not success:
                 return False, message
         return True, "CPU governor updated"

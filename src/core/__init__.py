@@ -5,3 +5,4 @@ from .power import PowerController
 from .fans import FanController
 
 __all__ = ['SensorReader', 'CPUController', 'PowerController', 'FanController']
+

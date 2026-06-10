@@ -28,49 +28,42 @@ from src.ui.theme import (
 # ── Plain-text formatters (no colour) ────────────────────────────────
 
 def fmt_temp(value: Optional[float]) -> str:
-    """Format temperature with degree symbol."""
     if value is None:
         return "---"
-    return f"{value:.0f}°C"
+    return f"{value:.0f}\u00b0C"
 
 
 def fmt_power(value: Optional[float]) -> str:
-    """Format power in watts with unit."""
     if value is None:
         return "---"
     return f"{value:.1f} W"
 
 
 def fmt_freq(value: Optional[int]) -> str:
-    """Format frequency in GHz with unit."""
     if value is None:
         return "---"
     return f"{value / 1000:.2f} GHz"
 
 
 def fmt_rpm(value: Optional[int]) -> str:
-    """Format fan speed with RPM suffix."""
     if value is None:
         return "---"
     return f"{value} RPM"
 
 
 def fmt_percent(value: Optional[int]) -> str:
-    """Format integer percentage with percent sign."""
     if value is None:
         return "---"
     return f"{value}%"
 
 
 def fmt_gb(value_mb: Optional[int]) -> str:
-    """Format MB as GB."""
     if value_mb is None:
         return "---"
     return f"{value_mb / 1024:.1f}"
 
 
 def fmt_vram(used: Optional[int], total: Optional[int]) -> str:
-    """Format VRAM as used/total GB."""
     if used is None or total is None:
         return "---"
     return f"{used / 1024:.1f}/{total / 1024:.1f}"
@@ -79,67 +72,48 @@ def fmt_vram(used: Optional[int], total: Optional[int]) -> str:
 # ── Coloured Text formatters (with severity) ─────────────────────────
 
 def coloured_temp(value: Optional[float]) -> Text:
-    """Temperature value with colour based on severity."""
     if value is None:
         return Text("---", style=DIM)
-    return Text(f"{value:.0f}°C", style=TEMP_SEVERITY(value))
+    return Text(f"{value:.0f}\u00b0C", style=TEMP_SEVERITY(value))
 
 
 def coloured_freq(value: Optional[int]) -> Text:
-    """Frequency GHz value."""
     if value is None:
         return Text("---", style=DIM)
     return Text(f"{value / 1000:.2f} GHz")
 
 
 def coloured_power(value: Optional[float]) -> Text:
-    """Power in watts."""
     if value is None:
         return Text("---", style=DIM)
     return Text(f"{value:.1f} W")
 
 
 def coloured_percent(value: Optional[int]) -> Text:
-    """Percentage value with colour based on severity."""
     if value is None:
         return Text("---", style=DIM)
     style = RATIO_SEVERITY((value or 0) / 100.0)
     return Text(f"{value}%", style=style)
 
 
-# ── Trend helpers ─────────────────────────────────────────────────────
+# ── Sparkline (colour-coded per value) ───────────────────────────────
 
-def trend_arrow(values: list[float]) -> str:
-    """Return a trend arrow (↑ ↓ →) based on the last two values."""
+def sparkline(values: list[float], width: int = 12) -> Text:
+    """Unicode sparkline of recent values."""
     if len(values) < 2:
-        return "→"
-    last = values[-1]
-    prev = values[-2]
-    diff = last - prev
-    if diff > 1.0:
-        return "↑"
-    if diff < -1.0:
-        return "↓"
-    return "→"
-
-
-# ── Sparkline ─────────────────────────────────────────────────────────
-
-def sparkline(values: list[float], width: int = 12) -> str:
-    """Unicode sparkline of recent values (btop-style)."""
-    if len(values) < 2:
-        return " " * width
+        return Text(" " * width)
     recent = values[-width:]
     low = min(recent)
     high = max(recent)
     span = high - low or 1.0
-    return "".join(
+    result = "".join(
         SPARKLINE_CHARS[min(7, int(((v - low) / span) * 7))]
         for v in recent
     ).rjust(width)
+    return Text(result)
 
 
-# ── Bar widgets (return Rich ``Text``) ────────────────────────────────
+# ── Bar widgets ───────────────────────────────────────────────────────
 
 def _make_bar(
     ratio: float,
@@ -147,7 +121,7 @@ def _make_bar(
     style: str = HEALTHY,
     suffix: str = "",
 ) -> Text:
-    """Build a ``████░░`` bar with optional suffix."""
+    """Build a ``\u2588\u2588\u2591\u2591`` bar with optional suffix."""
     filled = int(ratio * width)
     empty = width - filled
     bar = BAR_FILL * filled + BAR_EMPTY * empty
@@ -160,11 +134,10 @@ def temp_bar(temp: Optional[float], max_temp: float = 100, width: int = 14) -> T
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = min(1.0, temp / max_temp)
     style = TEMP_SEVERITY(temp)
-    return _make_bar(ratio, width, style, f"  {temp:.0f}°C")
+    return _make_bar(ratio, width, style, f"  {temp:.0f}\u00b0C")
 
 
 def power_bar(value: Optional[float], limit: Optional[float], width: int = 12) -> Text:
-    """Power bar showing current / limit."""
     if value is None or limit is None or limit <= 0:
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = min(1.0, value / limit)
@@ -173,7 +146,6 @@ def power_bar(value: Optional[float], limit: Optional[float], width: int = 12) -
 
 
 def vram_bar(used_mb: Optional[int], total_mb: Optional[int], width: int = 10) -> Text:
-    """VRAM usage bar with GB labels."""
     if used_mb is None or total_mb is None or total_mb <= 0:
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = min(1.0, used_mb / total_mb)
@@ -184,7 +156,6 @@ def vram_bar(used_mb: Optional[int], total_mb: Optional[int], width: int = 10) -
 
 
 def battery_bar(percent: Optional[int], width: int = 12) -> Text:
-    """Battery charge bar."""
     if percent is None:
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = percent / 100.0
@@ -193,7 +164,6 @@ def battery_bar(percent: Optional[int], width: int = 12) -> Text:
 
 
 def fan_bar(rpm: Optional[int], max_rpm: int = 6000, width: int = 12) -> Text:
-    """Fan speed bar."""
     if rpm is None:
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = min(1.0, rpm / max_rpm)
@@ -202,13 +172,37 @@ def fan_bar(rpm: Optional[int], max_rpm: int = 6000, width: int = 12) -> Text:
 
 
 def progress_bar(current: Optional[float], maximum: Optional[float], width: int = 16) -> Text:
-    """Generic progress bar (0-100%)."""
     if current is None or maximum is None or maximum <= 0:
         return Text(BAR_EMPTY * width + "  ---", style=DIM)
     ratio = min(1.0, current / maximum)
     style = RATIO_SEVERITY(ratio)
     pct = int(ratio * 100)
     return _make_bar(ratio, width, style, f"  {pct}%")
+
+
+def mini_temp_bar(temp: Optional[float], max_temp: float = 100, width: int = 8) -> Text:
+    """Compact temperature bar."""
+    if temp is None:
+        return Text(BAR_EMPTY * width + " ---", style=DIM)
+    ratio = min(1.0, temp / max_temp)
+    style = TEMP_SEVERITY(temp)
+    return _make_bar(ratio, width, style, f" {temp:.0f}\u00b0C")
+
+
+def mini_power_bar(value: Optional[float], limit: Optional[float], width: int = 8) -> Text:
+    if value is None or limit is None or limit <= 0:
+        return Text(BAR_EMPTY * width + " ---", style=DIM)
+    ratio = min(1.0, value / limit)
+    style = RATIO_SEVERITY(ratio)
+    return _make_bar(ratio, width, style, f" {value:.0f}/{limit:.0f}W")
+
+
+def mini_battery_bar(percent: Optional[int], width: int = 8) -> Text:
+    if percent is None:
+        return Text(BAR_EMPTY * width + " ---", style=DIM)
+    ratio = percent / 100.0
+    style = BATTERY_SEVERITY(percent)
+    return _make_bar(ratio, width, style, f" {percent}%")
 
 
 # ── Power limit string helper ─────────────────────────────────────────
@@ -218,8 +212,8 @@ def limit_str(value: Optional[float], limit: Optional[float], unit: str = "W") -
     if value is None and limit is None:
         return "---"
     if unit == "C":
-        left = f"{value:.1f}°C" if value is not None else "---"
-        right = f"{limit:.0f}°C" if limit is not None else "---"
+        left = f"{value:.1f}\u00b0C" if value is not None else "---"
+        right = f"{limit:.0f}\u00b0C" if limit is not None else "---"
     else:
         left = f"{value:.1f} {unit}" if value is not None else "---"
         right = f"{limit:.1f} {unit}" if limit is not None else "---"

@@ -1,12 +1,14 @@
 """Theme constants and severity helpers for rog-control.
 
-Provides a single source of truth for colors, border styles,
+Provides a single source of truth for colors, border styles, box types,
 and threshold-based severity mappings used across all UI widgets.
 """
 
 from __future__ import annotations
 
 from typing import Optional
+
+from rich import box
 
 
 # ── General palette ──────────────────────────────────────────────────
@@ -28,6 +30,12 @@ BORDER_CRITICAL = "red"
 BORDER_ACTIVE = "cyan"
 BORDER_DIM = "grey50"
 
+# ── Box types for different panel categories ─────────────────────────
+BOX_HEADER = box.DOUBLE
+BOX_DATA = box.ROUNDED
+BOX_MENU = box.HEAVY
+BOX_FOOTER = box.SQUARE
+
 # ── Badge / dot colors ───────────────────────────────────────────────
 DOT_OK = "green bold"
 DOT_WARN = "yellow bold"
@@ -35,9 +43,9 @@ DOT_MISSING = "yellow"
 DOT_ERROR = "red bold"
 
 # ── Progress bar characters ──────────────────────────────────────────
-BAR_FILL = "█"
-BAR_EMPTY = "░"
-SPARKLINE_CHARS = "▁▂▃▄▅▆▇█"
+BAR_FILL = "\u2588"
+BAR_EMPTY = "\u2591"
+SPARKLINE_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
 # ── Severity helpers ──────────────────────────────────────────────────
@@ -110,3 +118,44 @@ def battery_severity(percent: Optional[int]) -> str:
     if percent < 50:
         return WARN
     return HEALTHY
+
+
+def battery_border(percent: Optional[int]) -> str:
+    """Return border colour for a battery percentage."""
+    if percent is None:
+        return BORDER_DIM
+    if percent < 20:
+        return BORDER_CRITICAL
+    if percent < 50:
+        return BORDER_WARN
+    return BORDER_HEALTHY
+
+
+# ── Gradient colour helper ───────────────────────────────────────────
+
+def gradient_color(ratio: float) -> str:
+    """Return a Rich colour string interpolated along a heat gradient.
+
+    0.0   -> green
+    0.33  -> yellow
+    0.66  -> orange1
+    1.0   -> red
+    """
+    ratio = max(0.0, min(1.0, ratio))
+    if ratio < 0.33:
+        t = ratio / 0.33
+        return _blend_rich((0, 128, 0), (200, 200, 0), t)
+    elif ratio < 0.66:
+        t = (ratio - 0.33) / 0.33
+        return _blend_rich((200, 200, 0), (255, 128, 0), t)
+    else:
+        t = (ratio - 0.66) / 0.34
+        return _blend_rich((255, 128, 0), (220, 0, 0), t)
+
+
+def _blend_rich(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> str:
+    """Blend two RGB tuples and return a Rich-compatible colour string."""
+    r = int(a[0] + (b[0] - a[0]) * t)
+    g = int(a[1] + (b[1] - a[1]) * t)
+    bl = int(a[2] + (b[2] - a[2]) * t)
+    return f"rgb({r},{g},{bl})"

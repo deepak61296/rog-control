@@ -1,5 +1,11 @@
 """UI components for ROG Control."""
 
-from src.ui.app import RogControlApp
-
 __all__ = ["RogControlApp"]
+
+
+def __getattr__(name: str):
+    if name == "RogControlApp":
+        from src.ui.app import RogControlApp
+
+        return RogControlApp
+    raise AttributeError(name)

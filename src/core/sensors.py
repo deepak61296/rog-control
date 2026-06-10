@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import glob
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, Optional
+
+from src.core.process import run_command
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -16,7 +20,6 @@ class Capability:
 
     available: bool
     reason: str = ""
-    last_error: str = ""
 
 
 @dataclass
@@ -117,26 +120,6 @@ class SensorReader:
             return None
         return value / 1000.0
 
-    def _read_optional_command(self, cmd: list[str], timeout: int = 5) -> tuple[bool, str]:
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except FileNotFoundError:
-            return False, "command not found"
-        except subprocess.TimeoutExpired:
-            return False, "command timed out"
-
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
-            cleaned = output.strip() or f"exit code {result.returncode}"
-            return False, cleaned
-        return True, output
-
     def _read_cpu(self, snapshot: SystemSnapshot) -> None:
         base = "/sys/devices/system/cpu/cpu0/cpufreq"
         current = self._read_int(os.path.join(base, "scaling_cur_freq"))
@@ -167,20 +150,21 @@ class SensorReader:
         if not self._nvidia_smi:
             return Capability(False, "nvidia-smi not installed")
 
-        success, output = self._read_optional_command(
+        success, output = run_command(
             [
                 self._nvidia_smi,
                 "--query-gpu=temperature.gpu,power.draw,clocks.gr,utilization.gpu,memory.used,memory.total",
                 "--format=csv,noheader,nounits",
-            ]
+            ],
+            env={**os.environ, "LC_ALL": "C"},
         )
         if not success:
-            return Capability(False, "NVIDIA telemetry unavailable", output)
+            return Capability(False, f"NVIDIA telemetry unavailable: {output.strip() or 'unknown error'}")
 
         line = output.strip().splitlines()[0] if output.strip() else ""
         parts = [part.strip() for part in line.split(",")]
         if len(parts) < 6:
-            return Capability(False, "Unexpected nvidia-smi output", line)
+            return Capability(False, f"Unexpected nvidia-smi output: {line}")
 
         try:
             snapshot.nvidia_gpu = NvidiaGPUStats(
@@ -192,7 +176,7 @@ class SensorReader:
                 vram_total_mb=int(parts[5]),
             )
         except ValueError as exc:
-            return Capability(False, "Failed to parse nvidia-smi output", str(exc))
+            return Capability(False, f"Failed to parse nvidia-smi output: {exc}")
 
         return Capability(True)
 
@@ -222,7 +206,7 @@ class SensorReader:
 
     def get_snapshot(self) -> SystemSnapshot:
         snapshot = SystemSnapshot()
-        self._hwmon_paths = self._detect_hwmon_paths()
+        # hwmon paths are detected once in __init__ — they do not change at runtime
 
         snapshot.capabilities["amd_hwmon"] = Capability(
             "amdgpu" in self._hwmon_paths,

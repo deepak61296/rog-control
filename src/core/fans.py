@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from src.core.process import run_command
 from src.core.sensors import Capability
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,29 +42,16 @@ class FanController:
             self.last_error = self.capability.reason
             return False, self.last_error
 
-        try:
-            result = subprocess.run(
-                [self.asusctl_path, *args],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except FileNotFoundError:
-            self.capability = Capability(False, "asusctl not installed", "asusctl executable not found")
-            self.last_error = self.capability.last_error
-            return False, self.last_error
-        except subprocess.TimeoutExpired:
-            self.last_error = "asusctl command timed out"
-            return False, self.last_error
-
-        output = ((result.stdout or "") + (result.stderr or "")).strip()
-        if result.returncode != 0:
-            self.last_error = output or f"asusctl exited with code {result.returncode}"
+        success, output = run_command(
+            [self.asusctl_path, *args],
+            timeout=10,
+        )
+        if not success:
+            self.last_error = output
             return False, self.last_error
 
         self.last_error = ""
-        return True, output
+        return True, output.strip()
 
     def get_profile(self) -> tuple[str | None, str]:
         success, output = self._run_asusctl(["profile", "-p"])

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
+from src.core.process import run_command
 from src.core.sensors import Capability
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,39 +63,35 @@ class PowerController:
         if not shutil.which("sudo"):
             return Capability(False, "sudo not installed")
         if os.path.exists(self.ryzenadj_path):
+            ryzenadj_available = True
+        else:
+            ryzenadj_available = shutil.which(self.ryzenadj_path) is not None
+
+        if not ryzenadj_available:
+            return Capability(False, "ryzenadj not installed")
+
+        success, output = run_command(["sudo", "-n", "true"], timeout=2)
+        if success:
             return Capability(True)
-        if shutil.which(self.ryzenadj_path):
-            return Capability(True)
-        return Capability(False, "ryzenadj not installed")
+
+        reason = output or "passwordless sudo is not available"
+        return Capability(False, f"RyzenAdj needs passwordless sudo: {reason}")
 
     def _run_ryzenadj(self, args: list[str]) -> tuple[bool, str]:
         if not self.capability.available:
             self.last_error = self.capability.reason
             return False, self.last_error
 
-        try:
-            result = subprocess.run(
-                ["sudo", self.ryzenadj_path, *args],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except FileNotFoundError:
-            self.last_error = "ryzenadj executable not found"
-            self.capability = Capability(False, "ryzenadj not installed", self.last_error)
-            return False, self.last_error
-        except subprocess.TimeoutExpired:
-            self.last_error = "ryzenadj timed out"
-            return False, self.last_error
-
-        output = ((result.stdout or "") + (result.stderr or "")).strip()
-        if result.returncode != 0:
-            self.last_error = output or f"ryzenadj exited with code {result.returncode}"
+        success, output = run_command(
+            ["sudo", "-n", self.ryzenadj_path, *args],
+            timeout=10,
+        )
+        if not success:
+            self.last_error = output
             return False, self.last_error
 
         self.last_error = ""
-        return True, output
+        return True, output.strip()
 
     def get_power_info(self) -> PowerInfo:
         info = PowerInfo()

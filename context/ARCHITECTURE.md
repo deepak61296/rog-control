@@ -2,14 +2,16 @@
 
 ## Overview
 
-The application is a Rich-based terminal dashboard with a small core-backend layer:
+The application is a Textual-based terminal dashboard with a small core-backend layer:
 
 ```text
 src/main.py
   -> src/ui/app.py
       -> background collectors
-      -> Rich dashboard + menus
-      -> action handlers
+      -> Textual dashboard + controls
+      -> background action worker
+  -> src/ui/actions.py
+      -> typed hardware control actions
   -> src/core/sensors.py
   -> src/core/cpu.py
   -> src/core/power.py
@@ -25,10 +27,17 @@ The UI never talks to sysfs or vendor tools directly. It only renders typed snap
 `src/ui/app.py` owns:
 
 - terminal setup and key handling
-- the live Rich layout
-- menu routing for CPU, power, fan profile, fan curve, and quick presets
+- the Textual layout, buttons, scrolling, and confirmation modal
+- keyboard shortcuts for CPU, power, fan profile, fan curve, and quick presets
 - background collection threads
 - status and error messaging
+
+`src/ui/actions.py` owns:
+
+- typed control action definitions
+- quick preset sequencing
+- current fan profile targeting for fan curve changes
+- a single execution path used by buttons and keyboard shortcuts
 
 ### Core layer
 
@@ -80,4 +89,5 @@ This separation prevents the old bug where generic `gpu_*` fields mixed integrat
 - Missing hardware or binaries are represented as unavailable capabilities, not fake zeroes.
 - Backend command failures are surfaced as user-visible status and warning text.
 - Transient backend failures do not permanently disable retry attempts during the session.
-- Narrow terminals fall back to a compact summary view instead of rendering a broken dashboard.
+- Unsupported write controls are disabled before the user can trigger them.
+- Long-running hardware commands execute in a worker so input, rendering, and scroll handling remain responsive.
