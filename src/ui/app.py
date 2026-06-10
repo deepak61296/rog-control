@@ -236,12 +236,12 @@ class RogControlApp(App[None]):
     TITLE = "ROG Control"
 
     CSS = """
-    $primary: #58a6ff;
-    $secondary: #ff7b72;
-    $success: #3fb950;
-    $warning: #d29922;
-    $surface: #161b22;
-    $background: #0d1117;
+    $primary: #39ff14;
+    $secondary: #ff0033;
+    $success: #39ff14;
+    $warning: #ff0033;
+    $surface: #110505;
+    $background: #050000;
     $text-muted: #8b949e;
 
     Screen {
@@ -337,6 +337,26 @@ class RogControlApp(App[None]):
         margin-bottom: 1;
     }
 
+    .action-button.-primary {
+        background: $primary 15%;
+        color: $primary;
+        border: tall $primary;
+    }
+    .action-button.-primary:hover {
+        background: $primary;
+        color: black;
+    }
+
+    .action-button.-warning {
+        background: $secondary 15%;
+        color: $secondary;
+        border: tall $secondary;
+    }
+    .action-button.-warning:hover {
+        background: $secondary;
+        color: white;
+    }
+
     .action-detail {
         color: $text-muted;
         margin-left: 1;
@@ -345,11 +365,12 @@ class RogControlApp(App[None]):
     }
     
     #status-bar {
-        height: auto;
+        height: 1;
         padding: 0 1;
         background: $primary;
         color: black;
         text-style: bold;
+        overflow: hidden;
     }
     """
 
@@ -456,7 +477,8 @@ class RogControlApp(App[None]):
         if self.running_action:
             self.status_bar.update(f"Running action: {self.running_action.label}...")
         elif state.errors:
-            self.status_bar.update(f"WARNING: {state.errors[0]}")
+            error_line = state.errors[0].strip().split("\n")[0]
+            self.status_bar.update(f"WARNING: {error_line}")
         else:
             self.status_bar.update("System Monitoring Active | All Systems Nominal")
 
