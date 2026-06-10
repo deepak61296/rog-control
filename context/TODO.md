@@ -56,6 +56,8 @@ background hardware action execution.
 - [x] nvidia-smi output parsed with LC_ALL=C locale
 - [x] Raw terminal escape parsing removed from the main TUI
 - [x] Hardware commands no longer run directly inside key handlers
+- [x] Sudo-backed commands keep the current terminal session so startup `sudo -v` caching works
+- [x] Quit binding moved to Ctrl+C
 
 ## Low Priority
 - [ ] Configuration file for saving presets

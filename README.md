@@ -94,7 +94,7 @@ rog --no-sudo
 | `5` | Quick combined presets |
 | `b` | Close controls |
 | `Esc` | Close controls / Quit |
-| `q` | Quit |
+| `Ctrl+C` | Quit |
 
 Mouse clicks and scroll-wheel input are handled by Textual. Risky actions open
 a confirmation dialog before any hardware write is attempted.

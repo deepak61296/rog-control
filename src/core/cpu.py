@@ -43,7 +43,7 @@ class CPUController:
         if os.access(path, os.W_OK):
             return Capability(True)
 
-        success, output = run_command(["sudo", "-n", "true"], timeout=2)
+        success, output = run_command(["sudo", "-n", "true"], timeout=2, start_new_session=False)
         if success:
             return Capability(True)
 
@@ -110,6 +110,7 @@ class CPUController:
             ["sudo", "-n", "tee", path],
             timeout=10,
             input_data=f"{value}\n",
+            start_new_session=False,
         )
         if not success:
             self.last_error = self._format_write_error(output)

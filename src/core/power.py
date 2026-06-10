@@ -70,12 +70,12 @@ class PowerController:
         if not ryzenadj_available:
             return Capability(False, "ryzenadj not installed")
 
-        success, output = run_command(["sudo", "-n", "true"], timeout=2)
+        success, output = run_command(["sudo", "-n", "true"], timeout=2, start_new_session=False)
         if success:
             return Capability(True)
 
         reason = output or "passwordless sudo is not available"
-        return Capability(False, f"RyzenAdj needs passwordless sudo: {reason}")
+        return Capability(False, f"RyzenAdj needs sudo: {reason}")
 
     def _run_ryzenadj(self, args: list[str]) -> tuple[bool, str]:
         if not self.capability.available:
@@ -85,6 +85,7 @@ class PowerController:
         success, output = run_command(
             ["sudo", "-n", self.ryzenadj_path, *args],
             timeout=10,
+            start_new_session=False,
         )
         if not success:
             self.last_error = output

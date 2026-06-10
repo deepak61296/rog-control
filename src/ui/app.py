@@ -118,6 +118,8 @@ class ConfirmScreen(ModalScreen[bool]):
 class RogControlApp(App[None]):
     """Main Textual application."""
 
+    TITLE = "ROG Control"
+
     CSS = """
     Screen {
         layout: vertical;
@@ -210,7 +212,7 @@ class RogControlApp(App[None]):
         Binding("5", "shortcut_5", "Quick"),
         Binding("b", "back", "Back", show=False),
         Binding("escape", "back", "Back", show=False),
-        Binding("q", "quit_app", "Quit"),
+        Binding("ctrl+c", "quit_app", "Quit"),
     ]
 
     CPU_PRESETS = {
