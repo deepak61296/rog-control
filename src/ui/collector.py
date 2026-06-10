@@ -77,6 +77,9 @@ class DataCollector:
                         self.state.cpu_util_history = (self.state.cpu_util_history + [snapshot.cpu.util_percent])[-32:]
                     if snapshot.nvidia_gpu.util_percent is not None:
                         self.state.gpu_util_history = (self.state.gpu_util_history + [float(snapshot.nvidia_gpu.util_percent)])[-32:]
+                    if snapshot.nvidia_gpu.vram_used_mb is not None and snapshot.nvidia_gpu.vram_total_mb:
+                        vram_pct = (snapshot.nvidia_gpu.vram_used_mb / snapshot.nvidia_gpu.vram_total_mb) * 100.0
+                        self.state.vram_util_history = (self.state.vram_util_history + [vram_pct])[-32:]
                     for message in snapshot.errors:
                         self._record_error_unlocked(message)
             except Exception as exc:
@@ -200,5 +203,6 @@ class DataCollector:
                 amd_gpu_temp_history=list(self.state.amd_gpu_temp_history),
                 cpu_util_history=list(self.state.cpu_util_history),
                 gpu_util_history=list(self.state.gpu_util_history),
+                vram_util_history=list(self.state.vram_util_history),
                 errors=list(self.state.errors),
             )

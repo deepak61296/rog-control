@@ -35,4 +35,5 @@ class AppState:
     amd_gpu_temp_history: list[float] = field(default_factory=list)
     cpu_util_history: list[float] = field(default_factory=list)
     gpu_util_history: list[float] = field(default_factory=list)
+    vram_util_history: list[float] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

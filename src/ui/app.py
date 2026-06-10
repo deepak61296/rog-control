@@ -127,7 +127,9 @@ class CPUDashboard(Static):
             yield self.power
             self.governor = MetricRow("Governor")
             yield self.governor
-            yield Label("Utilization %", classes="graph-title")
+            self.util = MetricRow("Utilization")
+            yield self.util
+            yield Label("CPU Utilization History", classes="graph-title")
             self.sparkline = Sparkline(summary_function=max)
             yield self.sparkline
 
@@ -143,6 +145,7 @@ class CPUDashboard(Static):
         power = state.power_info.stapm_value
         self.power.value = f"{power:.1f} W" if power is not None else "---"
         self.governor.value = cpu.governor or "---"
+        self.util.value = f"{cpu.util_percent:.1f} %" if cpu.util_percent is not None else "---"
 
         if state.cpu_util_history:
             self.sparkline.data = state.cpu_util_history
@@ -158,11 +161,16 @@ class GPUDashboard(Static):
             yield self.clock
             self.power = MetricRow("Power")
             yield self.power
-            self.vram = MetricRow("VRAM")
+            self.vram = MetricRow("VRAM Used")
             yield self.vram
-            yield Label("Utilization %", classes="graph-title")
+            self.util = MetricRow("Utilization")
+            yield self.util
+            yield Label("GPU Utilization History", classes="graph-title")
             self.sparkline = Sparkline(summary_function=max)
             yield self.sparkline
+            yield Label("VRAM Utilization History", classes="graph-title")
+            self.vram_sparkline = Sparkline(summary_function=max)
+            yield self.vram_sparkline
 
     def update_state(self, state: AppState) -> None:
         gpu = state.snapshot.nvidia_gpu
@@ -178,8 +186,13 @@ class GPUDashboard(Static):
         else:
             self.vram.value = "---"
 
+        self.util.value = f"{gpu.util_percent:.1f} %" if gpu.util_percent is not None else "---"
+
         if state.gpu_util_history:
             self.sparkline.data = state.gpu_util_history
+            
+        if state.vram_util_history:
+            self.vram_sparkline.data = state.vram_util_history
 
 
 class PowerDashboard(Static):
