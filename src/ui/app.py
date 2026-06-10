@@ -1,56 +1,54 @@
-"""Textual terminal application for ROG Control."""
+"""Modern Textual TUI for ROG Control."""
 
 from __future__ import annotations
 
-from collections import defaultdict
 import logging
 import threading
+from collections import defaultdict
 
-from rich.align import Align
-from rich.columns import Columns
-from rich.console import Group, RenderableType
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, Grid
+from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Label, Static
+from textual.widgets import Button, Footer, Header, Label, Static, Sparkline, TabbedContent, TabPane, Markdown
 
 from src.core.sensors import Capability
 from src.ui.actions import ControlAction, execute_control_action
 from src.ui.collector import DataCollector
-from src.ui.formatters import fmt_freq, fmt_percent, fmt_power, fmt_rpm, fmt_temp, limit_str, sparkline
 from src.ui.state import AppState
 
 logger = logging.getLogger(__name__)
 
-
 PANEL_TITLES = {
-    "cpu": "CPU Limits",
-    "power": "Power Presets",
-    "fan_profile": "Fan Profiles",
-    "fan_curve": "Fan Curves",
-    "quick": "Quick Presets",
-}
-PANEL_DOM_IDS = {
-    "cpu": "cpu",
-    "power": "power",
-    "fan_profile": "fan-profile",
-    "fan_curve": "fan-curve",
-    "quick": "quick",
+    "cpu": "CPU",
+    "power": "Power",
+    "fan_profile": "Fans",
+    "fan_curve": "Curve",
+    "quick": "Quick",
 }
 PANEL_ORDER = ("cpu", "power", "fan_profile", "fan_curve", "quick")
 
 
-def _capability_badge(capability: Capability, label: str, last_error: str = "") -> Text:
-    if last_error:
-        return Text(f"{label}: Warning", style="bold yellow")
-    if capability.available:
-        return Text("\u25cf " + label, style="green bold")
-    return Text("\u25cb " + label, style="yellow bold")
+class MetricRow(Static):
+    """A row containing a label on the left and a reactive value on the right."""
+    
+    value = reactive("---")
+
+    def __init__(self, label: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.label_text = label
+        self._value_label = Label(self.value, classes="metric-value")
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="metric-row"):
+            yield Label(self.label_text, classes="metric-label")
+            yield self._value_label
+
+    def watch_value(self, value: str) -> None:
+        if hasattr(self, "_value_label"):
+            self._value_label.update(value)
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -115,92 +113,243 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(True)
 
 
+class CPUDashboard(Static):
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("CPU", classes="card-title")
+            self.temp = MetricRow("Temperature")
+            yield self.temp
+            self.freq = MetricRow("Frequency")
+            yield self.freq
+            self.power = MetricRow("Package Power")
+            yield self.power
+            self.governor = MetricRow("Governor")
+            yield self.governor
+            yield Label("Utilization %", classes="graph-title")
+            self.sparkline = Sparkline(summary_function=max)
+            yield self.sparkline
+
+    def update_state(self, state: AppState) -> None:
+        cpu = state.snapshot.cpu
+        temp = cpu.temp_c
+        self.temp.value = f"{temp:.0f} °C" if temp is not None else "---"
+        freq = cpu.current_freq_mhz
+        self.freq.value = f"{freq / 1000:.2f} GHz" if freq is not None else "---"
+        
+        power = state.power_info.stapm_value
+        self.power.value = f"{power:.1f} W" if power is not None else "---"
+        self.governor.value = cpu.governor or "---"
+
+        if state.cpu_util_history:
+            self.sparkline.data = state.cpu_util_history
+
+
+class GPUDashboard(Static):
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("NVIDIA dGPU", classes="card-title")
+            self.temp = MetricRow("Temperature")
+            yield self.temp
+            self.clock = MetricRow("Clock")
+            yield self.clock
+            self.power = MetricRow("Power")
+            yield self.power
+            self.vram = MetricRow("VRAM")
+            yield self.vram
+            yield Label("Utilization %", classes="graph-title")
+            self.sparkline = Sparkline(summary_function=max)
+            yield self.sparkline
+
+    def update_state(self, state: AppState) -> None:
+        gpu = state.snapshot.nvidia_gpu
+        temp = gpu.temp_c
+        self.temp.value = f"{temp:.0f} °C" if temp is not None else "---"
+        clock = gpu.clock_mhz
+        self.clock.value = f"{clock} MHz" if clock is not None else "---"
+        power = gpu.power_w
+        self.power.value = f"{power:.1f} W" if power is not None else "---"
+        
+        if gpu.vram_used_mb is not None and gpu.vram_total_mb is not None:
+            self.vram.value = f"{gpu.vram_used_mb}/{gpu.vram_total_mb} MB"
+        else:
+            self.vram.value = "---"
+
+        if state.gpu_util_history:
+            self.sparkline.data = state.gpu_util_history
+
+
+class PowerDashboard(Static):
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Power Limits", classes="card-title")
+            self.stapm = MetricRow("STAPM (Sustained)")
+            yield self.stapm
+            self.fast = MetricRow("Fast PPT (Boost)")
+            yield self.fast
+            self.slow = MetricRow("Slow PPT (Long)")
+            yield self.slow
+            self.tctl = MetricRow("Thermal Target")
+            yield self.tctl
+
+    def update_state(self, state: AppState) -> None:
+        info = state.power_info
+        
+        def fmt(val: float | None, lim: float | None, unit: str = "W") -> str:
+            v = f"{val:.1f}" if val is not None else "---"
+            l = f"{lim:.0f}" if lim is not None else "---"
+            return f"{v} / {l} {unit}"
+
+        self.stapm.value = fmt(info.stapm_value, info.stapm_limit)
+        self.fast.value = fmt(info.fast_value, info.fast_limit)
+        self.slow.value = fmt(info.slow_value, info.slow_limit)
+        self.tctl.value = fmt(info.tctl_value, info.tctl_limit, "°C")
+
+
+class CoolingDashboard(Static):
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Cooling", classes="card-title")
+            self.cpu_fan = MetricRow("CPU Fan")
+            yield self.cpu_fan
+            self.gpu_fan = MetricRow("GPU Fan")
+            yield self.gpu_fan
+            self.profile = MetricRow("Active Profile")
+            yield self.profile
+            self.curve = MetricRow("Custom Curve")
+            yield self.curve
+
+    def update_state(self, state: AppState) -> None:
+        cooling = state.snapshot.cooling
+        self.cpu_fan.value = f"{cooling.cpu_fan_rpm} RPM" if cooling.cpu_fan_rpm else "---"
+        self.gpu_fan.value = f"{cooling.gpu_fan_rpm} RPM" if cooling.gpu_fan_rpm else "---"
+        self.profile.value = state.fan_profile or "---"
+        
+        if state.custom_curve_enabled is None:
+            self.curve.value = "---"
+        else:
+            self.curve.value = "Enabled" if state.custom_curve_enabled else "Disabled"
+
+
 class RogControlApp(App[None]):
     """Main Textual application."""
 
     TITLE = "ROG Control"
 
     CSS = """
+    $primary: #58a6ff;
+    $secondary: #ff7b72;
+    $success: #3fb950;
+    $warning: #d29922;
+    $surface: #161b22;
+    $background: #0d1117;
+    $text-muted: #8b949e;
+
     Screen {
         layout: vertical;
+        background: $background;
     }
 
-    #content {
+    #main-grid {
+        layout: grid;
+        grid-size: 2 1;
+        grid-columns: 2fr 1fr;
         height: 1fr;
     }
 
-    #dashboard {
-        width: 1fr;
+    .dashboard-pane {
+        layout: grid;
+        grid-size: 2 2;
+        padding: 1 2;
+        grid-gutter: 1 2;
+        overflow-y: auto;
+    }
+
+    .control-pane {
+        border-left: vkey #30363d;
+        background: $surface;
         padding: 0 1;
+        overflow-y: auto;
     }
 
-    .dashboard-row {
-        height: 1fr;
-        min-height: 9;
-    }
-
-    .metric-card {
-        width: 1fr;
+    .card {
+        border: round $primary;
+        background: #0d1117;
+        padding: 0 1;
         height: 100%;
-        min-height: 8;
-        padding: 0 1;
+        min-height: 12;
     }
 
-    #header-card {
-        height: auto;
-        min-height: 5;
-        padding: 0 1;
-    }
-
-    #controls {
-        width: 42;
-        border-left: solid $accent;
-        padding: 0 1;
-    }
-
-    #control-title {
+    .card-title {
         text-style: bold;
-        margin: 1 0;
-    }
-
-    #control-tabs {
-        height: auto;
+        color: $primary;
+        width: 100%;
+        text-align: center;
         margin-bottom: 1;
+        border-bottom: solid $primary;
+    }
+    
+    .graph-title {
+        color: $text-muted;
+        text-style: italic;
+        margin-top: 1;
     }
 
-    #control-tabs Button {
+    .metric-row {
+        layout: horizontal;
+        height: auto;
+    }
+
+    .metric-label {
         width: 1fr;
-        min-width: 6;
+        color: $text-muted;
     }
 
-    .control-section {
-        padding-bottom: 1;
-    }
-
-    .section-heading {
+    .metric-value {
+        width: 1fr;
+        text-align: right;
         text-style: bold;
-        margin: 1 0 0 0;
     }
 
+    Sparkline {
+        height: 1fr;
+        min-height: 3;
+        margin-top: 1;
+    }
+
+    Sparkline > .sparkline--max-color {
+        color: $secondary;
+    }
+
+    Sparkline > .sparkline--min-color {
+        color: $success;
+    }
+    
+    TabbedContent {
+        height: auto;
+    }
+    
+    TabPane {
+        padding: 1 0;
+    }
+    
     .action-button {
         width: 100%;
-        margin-top: 1;
+        margin-bottom: 1;
     }
 
     .action-detail {
         color: $text-muted;
         margin-left: 1;
-    }
-
-    #close-controls {
-        width: 100%;
-        margin-top: 1;
-    }
-
-    #status-card {
+        margin-bottom: 1;
         height: auto;
-        max-height: 9;
+    }
+    
+    #status-bar {
+        height: auto;
         padding: 0 1;
+        background: $primary;
+        color: black;
+        text-style: bold;
     }
     """
 
@@ -210,8 +359,6 @@ class RogControlApp(App[None]):
         Binding("3", "shortcut_3", "Profile"),
         Binding("4", "shortcut_4", "Curve"),
         Binding("5", "shortcut_5", "Quick"),
-        Binding("b", "back", "Back", show=False),
-        Binding("escape", "back", "Back", show=False),
         Binding("ctrl+c", "quit_app", "Quit"),
     ]
 
@@ -242,61 +389,53 @@ class RogControlApp(App[None]):
         super().__init__()
         self.state = getattr(collector, "state", AppState())
         self.collector = collector or DataCollector(self.state)
-        self.active_control_panel: str | None = None
         self.running_action: ControlAction | None = None
-        self._action_thread: threading.Thread | None = None
         self.actions = self._build_actions()
+        
         self.actions_by_panel: dict[str, list[ControlAction]] = defaultdict(list)
         self.actions_by_key: dict[str, dict[str, ControlAction]] = defaultdict(dict)
         self.actions_by_button_id: dict[str, ControlAction] = {}
         for action in self.actions:
             self.actions_by_panel[action.panel].append(action)
             self.actions_by_key[action.panel][action.key] = action
+            
+        self.active_control_panel: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal(id="content"):
-            with VerticalScroll(id="dashboard"):
-                yield Static(id="header-card")
-                with Horizontal(classes="dashboard-row"):
-                    yield Static(id="cpu-card", classes="metric-card")
-                    yield Static(id="cooling-card", classes="metric-card")
-                with Horizontal(classes="dashboard-row"):
-                    yield Static(id="amd-gpu-card", classes="metric-card")
-                    yield Static(id="nvidia-card", classes="metric-card")
-                with Horizontal(classes="dashboard-row"):
-                    yield Static(id="power-card", classes="metric-card")
-                    yield Static(id="battery-card", classes="metric-card")
-            with VerticalScroll(id="controls"):
-                yield Label("Controls", id="control-title")
-                with Horizontal(id="control-tabs"):
-                    yield Button("CPU", id="tab-cpu")
-                    yield Button("Power", id="tab-power")
-                    yield Button("Fans", id="tab-fan-profile")
-                    yield Button("Curve", id="tab-fan-curve")
-                    yield Button("Quick", id="tab-quick")
-                for panel in PANEL_ORDER:
-                    with Vertical(id=f"{PANEL_DOM_IDS[panel]}-section", classes="control-section"):
-                        yield Label(PANEL_TITLES[panel], classes="section-heading")
-                        for action in self.actions_by_panel[panel]:
-                            button_id = self._button_id(action)
-                            self.actions_by_button_id[button_id] = action
-                            yield Button(
-                                f"{action.key}  {action.label}",
-                                id=button_id,
-                                classes="action-button",
-                                variant=self._button_variant(action),
-                            )
-                            yield Static(action.description, classes="action-detail")
-                yield Button("Close", id="close-controls")
-        yield Static(id="status-card")
+        
+        with Horizontal(id="main-grid"):
+            with Grid(classes="dashboard-pane"):
+                self.cpu_card = CPUDashboard(classes="card")
+                yield self.cpu_card
+                self.gpu_card = GPUDashboard(classes="card")
+                yield self.gpu_card
+                self.power_card = PowerDashboard(classes="card")
+                yield self.power_card
+                self.cooling_card = CoolingDashboard(classes="card")
+                yield self.cooling_card
+
+            with Vertical(classes="control-pane"):
+                with TabbedContent(id="tabs"):
+                    for panel in PANEL_ORDER:
+                        with TabPane(PANEL_TITLES[panel], id=f"tab-{panel}"):
+                            for action in self.actions_by_panel[panel]:
+                                btn_id = f"action-{action.id}"
+                                self.actions_by_button_id[btn_id] = action
+                                yield Button(
+                                    f"{action.key}  {action.label}",
+                                    id=btn_id,
+                                    classes="action-button",
+                                    variant="warning" if action.confirmation else "primary",
+                                )
+                                yield Label(action.description, classes="action-detail")
+
+        self.status_bar = Label("System Monitoring Active", id="status-bar")
+        yield self.status_bar
         yield Footer()
 
     def on_mount(self) -> None:
         self.collector.start()
-        self.query_one("#controls", VerticalScroll).display = False
-        for panel in PANEL_ORDER:
-            self.query_one(f"#{PANEL_DOM_IDS[panel]}-section", Vertical).display = False
         self.set_interval(0.5, self.refresh_dashboard)
         self.refresh_dashboard()
 
@@ -305,63 +444,34 @@ class RogControlApp(App[None]):
 
     def refresh_dashboard(self) -> None:
         state = self.collector.current_state()
-        self.query_one("#header-card", Static).update(self._render_header(state))
-        self.query_one("#cpu-card", Static).update(self._render_cpu_panel(state))
-        self.query_one("#cooling-card", Static).update(self._render_cooling_panel(state))
-        self.query_one("#amd-gpu-card", Static).update(self._render_amd_gpu_panel(state))
-        self.query_one("#nvidia-card", Static).update(self._render_nvidia_panel(state))
-        self.query_one("#power-card", Static).update(self._render_power_panel(state))
-        self.query_one("#battery-card", Static).update(self._render_battery_panel(state))
-        self.query_one("#status-card", Static).update(self._render_status(state))
-        self._sync_button_states(state)
+        self.cpu_card.update_state(state)
+        self.gpu_card.update_state(state)
+        self.power_card.update_state(state)
+        self.cooling_card.update_state(state)
+
+        for action in self.actions:
+            button = self.query_one(f"#action-{action.id}", Button)
+            button.disabled = self.running_action is not None or not self._action_available(action, state)
+            
+        if self.running_action:
+            self.status_bar.update(f"Running action: {self.running_action.label}...")
+        elif state.errors:
+            self.status_bar.update(f"WARNING: {state.errors[0]}")
+        else:
+            self.status_bar.update("System Monitoring Active | All Systems Nominal")
 
     @on(Button.Pressed)
     def _button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
-        if button_id == "close-controls":
-            self._show_controls(None)
-            return
-        if button_id.startswith("tab-"):
-            panel = button_id.removeprefix("tab-").replace("-", "_")
-            if panel in PANEL_TITLES:
-                self._show_controls(panel)
-            return
         action = self.actions_by_button_id.get(button_id)
         if action is not None:
             self._request_action(action)
 
-    def on_key(self, event) -> None:
-        if self.active_control_panel is None:
-            return
-        action = self.actions_by_key[self.active_control_panel].get(event.key.lower())
-        if action is None:
-            return
-        event.stop()
-        self._request_action(action)
-
-    def action_shortcut_1(self) -> None:
-        self._handle_shortcut("1")
-
-    def action_shortcut_2(self) -> None:
-        self._handle_shortcut("2")
-
-    def action_shortcut_3(self) -> None:
-        self._handle_shortcut("3")
-
-    def action_shortcut_4(self) -> None:
-        self._handle_shortcut("4")
-
-    def action_shortcut_5(self) -> None:
-        self._handle_shortcut("5")
-
-    def action_back(self) -> None:
-        if self.active_control_panel is not None:
-            self._show_controls(None)
-        else:
-            self.exit()
-
-    def action_quit_app(self) -> None:
-        self.exit()
+    def action_shortcut_1(self) -> None: self._handle_shortcut("1")
+    def action_shortcut_2(self) -> None: self._handle_shortcut("2")
+    def action_shortcut_3(self) -> None: self._handle_shortcut("3")
+    def action_shortcut_4(self) -> None: self._handle_shortcut("4")
+    def action_shortcut_5(self) -> None: self._handle_shortcut("5")
 
     def _handle_shortcut(self, key: str) -> None:
         if self.active_control_panel is not None:
@@ -370,28 +480,19 @@ class RogControlApp(App[None]):
                 self._request_action(action)
             return
         panel = {"1": "cpu", "2": "power", "3": "fan_profile", "4": "fan_curve", "5": "quick"}[key]
-        self._show_controls(panel)
-
-    def _show_controls(self, panel: str | None) -> None:
+        tabs = self.query_one("#tabs", TabbedContent)
+        tabs.active = f"tab-{panel}"
         self.active_control_panel = panel
-        self.query_one("#controls", VerticalScroll).display = panel is not None
-        for item in PANEL_ORDER:
-            self.query_one(f"#{PANEL_DOM_IDS[item]}-section", Vertical).display = item == panel
-        title = "Controls" if panel is None else PANEL_TITLES[panel]
-        self.query_one("#control-title", Label).update(title)
-        if panel is not None:
-            first_action = next(iter(self.actions_by_panel[panel]), None)
-            if first_action is not None:
-                self.query_one(f"#{self._button_id(first_action)}", Button).focus()
+
+    def action_quit_app(self) -> None:
+        self.exit()
 
     def _request_action(self, action: ControlAction) -> None:
         if self.running_action is not None:
-            self.collector.update_message(f"Still running: {self.running_action.label}", "yellow")
-            self.refresh_dashboard()
+            self.notify(f"Still running: {self.running_action.label}", severity="warning")
             return
         if not self._action_available(action, self.collector.current_state()):
-            self.collector.update_message(f"Unavailable: {action.label}", "yellow")
-            self.refresh_dashboard()
+            self.notify(f"Unavailable: {action.label}", severity="error")
             return
         if action.confirmation:
             self.push_screen(ConfirmScreen(action.confirmation), lambda confirmed: self._confirmed_action(action, confirmed))
@@ -402,20 +503,16 @@ class RogControlApp(App[None]):
         if confirmed:
             self._start_action(action)
         else:
-            self.collector.update_message("Cancelled.", "yellow")
-            self.refresh_dashboard()
+            self.notify("Action Cancelled.", severity="information")
 
     def _start_action(self, action: ControlAction) -> None:
         self.running_action = action
-        self.collector.update_message(f"Running: {action.label}", "yellow")
-        self.refresh_dashboard()
-        self._action_thread = threading.Thread(
+        threading.Thread(
             target=self._run_control_action,
             args=(action,),
             daemon=True,
-            name=f"rog-control-action-{action.id}",
-        )
-        self._action_thread.start()
+        ).start()
+        self.refresh_dashboard()
 
     def _run_control_action(self, action: ControlAction) -> None:
         try:
@@ -426,19 +523,12 @@ class RogControlApp(App[None]):
         try:
             self.call_from_thread(self._finish_action, action, success, message)
         except RuntimeError:
-            logger.debug("Skipped action completion because the app is no longer running")
+            pass
 
     def _finish_action(self, action: ControlAction, success: bool, message: str) -> None:
         self.running_action = None
-        self.collector.update_message(message, "green" if success else "red")
-        if success:
-            self._show_controls(None)
+        self.notify(message, severity="information" if success else "error")
         self.refresh_dashboard()
-
-    def _sync_button_states(self, state: AppState) -> None:
-        for action in self.actions:
-            button = self.query_one(f"#{self._button_id(action)}", Button)
-            button.disabled = self.running_action is not None or not self._action_available(action, state)
 
     @staticmethod
     def _action_available(action: ControlAction, state: AppState) -> bool:
@@ -458,7 +548,7 @@ class RogControlApp(App[None]):
                     panel="cpu",
                     key=key,
                     label=label,
-                    description=f"Set max CPU frequency to {freq / 1_000_000:.2f} GHz.",
+                    description=f"Max CPU frequency {freq / 1_000_000:.2f} GHz.",
                     kind="cpu_freq",
                     payload={"freq": freq},
                     capabilities=("cpu",),
@@ -477,7 +567,7 @@ class RogControlApp(App[None]):
                     panel="power",
                     key=key,
                     label=label,
-                    description=f"Apply RyzenAdj limits with {watts}W STAPM.",
+                    description=f"RyzenAdj {watts}W STAPM limit.",
                     kind="power_preset",
                     payload={"preset": preset_name},
                     capabilities=("power",),
@@ -492,7 +582,7 @@ class RogControlApp(App[None]):
                     panel="fan_profile",
                     key=key,
                     label=profile,
-                    description="Apply ASUS profile behavior for this mode.",
+                    description=f"Apply {profile} profile.",
                     kind="fan_profile",
                     payload={"profile": profile},
                     capabilities=("fan",),
@@ -507,7 +597,7 @@ class RogControlApp(App[None]):
                     panel="fan_curve",
                     key=key,
                     label=preset.replace("_", " ").title(),
-                    description="Apply this curve to the current ASUS fan profile.",
+                    description="Apply custom fan curve.",
                     kind="fan_curve",
                     payload={"preset": preset},
                     capabilities=("fan",),
@@ -520,7 +610,7 @@ class RogControlApp(App[None]):
                 panel="fan_curve",
                 key="d",
                 label="Firmware defaults",
-                description="Reset fan curves and return control to firmware.",
+                description="Reset to firmware fan control.",
                 kind="fan_reset",
                 payload={},
                 capabilities=("fan",),
@@ -538,7 +628,7 @@ class RogControlApp(App[None]):
                     panel="quick",
                     key=key,
                     label=name,
-                    description=f"{freq / 1_000_000:.2f} GHz, {power_preset}, {fan_profile}, {fan_curve}.",
+                    description=f"{freq / 1_000_000:.2f} GHz, {power_preset}, {fan_profile}.",
                     kind="quick_preset",
                     payload={
                         "name": name,
@@ -552,179 +642,3 @@ class RogControlApp(App[None]):
                 )
             )
         return actions
-
-    @staticmethod
-    def _button_id(action: ControlAction) -> str:
-        return f"action-{action.id}"
-
-    @staticmethod
-    def _button_variant(action: ControlAction) -> str:
-        if action.confirmation:
-            return "warning"
-        if action.panel == "quick":
-            return "success"
-        return "primary"
-
-    def _render_header(self, state: AppState) -> Panel:
-        snapshot = state.snapshot
-        title = Text("ROG Control", style="bold green")
-        subtitle = Text("System Monitoring and Controls", style="dim")
-        badges = [
-            _capability_badge(snapshot.capabilities.get("cpu_hwmon", Capability(False, "unknown")), "CPU"),
-            _capability_badge(snapshot.capabilities.get("amd_hwmon", Capability(False, "unknown")), "AMD GPU"),
-            _capability_badge(snapshot.capabilities.get("nvidia", Capability(False, "unknown")), "NVIDIA"),
-            _capability_badge(state.power_capability, "RyzenAdj", state.power_error),
-            _capability_badge(state.fan_capability, "asusctl", state.fan_error),
-        ]
-        return Panel(
-            Group(Align.center(title), Align.center(subtitle), Columns(badges, expand=True)),
-            border_style="green",
-        )
-
-    def _metric_table(self, title: str, rows: list[tuple[str, str | Text]], border: str = "green") -> Panel:
-        table = Table.grid(expand=True)
-        table.add_column(style="bold white", ratio=1)
-        table.add_column(justify="right", ratio=1)
-        for label, value in rows:
-            table.add_row(label, value)
-        return Panel(table, title=title, border_style=border)
-
-    def _render_cpu_panel(self, state: AppState) -> Panel:
-        cpu = state.snapshot.cpu
-        rows = [
-            ("Temperature", fmt_temp(cpu.temp_c)),
-            ("Current", fmt_freq(cpu.current_freq_mhz)),
-            ("Limit", fmt_freq(cpu.max_freq_mhz)),
-            ("Governor", cpu.governor or "Unavailable"),
-            ("Trend", sparkline(state.cpu_temp_history)),
-        ]
-        return self._metric_table("CPU", rows, border=self._temp_border(cpu.temp_c))
-
-    def _render_cooling_panel(self, state: AppState) -> Panel:
-        cooling = state.snapshot.cooling
-        fan_status = "Enabled" if state.custom_curve_enabled else "Disabled"
-        if state.custom_curve_enabled is None:
-            fan_status = "Unavailable"
-        rows = [
-            ("CPU Fan", fmt_rpm(cooling.cpu_fan_rpm)),
-            ("GPU Fan", fmt_rpm(cooling.gpu_fan_rpm)),
-            ("Profile", state.fan_profile or "Unavailable"),
-            ("Custom Curve", fan_status),
-            ("NVMe Temp", fmt_temp(state.snapshot.nvme_temp_c)),
-        ]
-        panel = self._metric_table("Cooling", rows, border=self._temp_border(state.snapshot.nvme_temp_c))
-        if state.fan_capability.available and not state.fan_error:
-            return panel
-        details = state.fan_error or state.fan_capability.reason
-        return Panel(Group(panel.renderable, Text(details, style="yellow")), title="Cooling", border_style="yellow")
-
-    def _render_amd_gpu_panel(self, state: AppState) -> Panel:
-        gpu = state.snapshot.amd_gpu
-        capability = state.snapshot.capabilities.get("amd_hwmon", Capability(False, "AMD GPU telemetry unavailable"))
-        rows = [
-            ("Temperature", fmt_temp(gpu.temp_c)),
-            ("Clock", f"{gpu.clock_mhz} MHz" if gpu.clock_mhz is not None else "Unavailable"),
-            ("Power", fmt_power(gpu.power_w)),
-            ("Trend", sparkline(state.amd_gpu_temp_history)),
-        ]
-        panel = self._metric_table("AMD iGPU", rows, border=self._temp_border(gpu.temp_c))
-        if capability.available:
-            return panel
-        return Panel(Group(panel.renderable, Text(capability.reason, style="yellow")), title="AMD iGPU", border_style="yellow")
-
-    def _render_nvidia_panel(self, state: AppState) -> Panel:
-        gpu = state.snapshot.nvidia_gpu
-        capability = state.snapshot.capabilities.get("nvidia", Capability(False, "NVIDIA telemetry unavailable"))
-        vram = "Unavailable"
-        if gpu.vram_used_mb is not None and gpu.vram_total_mb is not None:
-            vram = f"{gpu.vram_used_mb}/{gpu.vram_total_mb} MB"
-        rows = [
-            ("Temperature", fmt_temp(gpu.temp_c)),
-            ("Clock", f"{gpu.clock_mhz} MHz" if gpu.clock_mhz is not None else "Unavailable"),
-            ("Power", fmt_power(gpu.power_w)),
-            ("Utilization", fmt_percent(gpu.util_percent)),
-            ("VRAM", vram),
-        ]
-        panel = self._metric_table("NVIDIA dGPU", rows, border=self._temp_border(gpu.temp_c))
-        if capability.available:
-            return panel
-        return Panel(Group(panel.renderable, Text(capability.reason, style="yellow")), title="NVIDIA dGPU", border_style="yellow")
-
-    def _render_power_panel(self, state: AppState) -> Panel:
-        info = state.power_info
-        rows = [
-            ("STAPM", limit_str(info.stapm_value, info.stapm_limit)),
-            ("Fast PPT", limit_str(info.fast_value, info.fast_limit)),
-            ("Slow PPT", limit_str(info.slow_value, info.slow_limit)),
-            ("Thermal", limit_str(info.tctl_value, info.tctl_limit, unit="C")),
-        ]
-        panel = self._metric_table("Power", rows, border=self._ratio_border(info.stapm_value, info.stapm_limit))
-        if state.power_capability.available and not state.power_error:
-            return panel
-        details = state.power_error or state.power_capability.reason
-        return Panel(Group(panel.renderable, Text(details, style="yellow")), title="Power", border_style="yellow")
-
-    def _render_battery_panel(self, state: AppState) -> Panel:
-        battery = state.snapshot.battery
-        capability = state.snapshot.capabilities.get("battery", Capability(False, "Battery unavailable"))
-        rows = [
-            ("Charge", fmt_percent(battery.percent)),
-            ("Status", battery.status or "Unavailable"),
-            ("Power", fmt_power(battery.power_w)),
-        ]
-        panel = self._metric_table("Battery & Status", rows, border=self._battery_border(battery.percent))
-        if capability.available:
-            return panel
-        return Panel(Group(panel.renderable, Text(capability.reason, style="yellow")), title="Battery & Status", border_style="yellow")
-
-    def _render_status(self, state: AppState) -> RenderableType:
-        cpu_status = fmt_freq(state.snapshot.cpu.max_freq_mhz) if state.snapshot.cpu.max_freq_mhz is not None else "---"
-        power_status = f"{state.power_info.stapm_limit:.0f}W" if state.power_info.stapm_limit is not None else "---"
-        lines: list[RenderableType] = [
-            Text(state.message, style=state.message_style),
-            Text.from_markup(
-                f"[dim]CPU cap:[/] {cpu_status}  [dim]Power:[/] {power_status}  [dim]Fan:[/] {state.fan_profile or '---'}"
-            ),
-        ]
-        if self.running_action is not None:
-            lines.append(Text(f"Running action: {self.running_action.label}", style="yellow"))
-        if state.errors:
-            error_text = Text("\n".join(state.errors[:4]), style="yellow")
-            lines.append(error_text)
-        border = "yellow" if state.errors else "green"
-        return Panel(Group(*lines), title="Status", border_style=border)
-
-    @staticmethod
-    def _temp_border(temp: float | None) -> str:
-        if temp is None:
-            return "green"
-        if temp >= 90:
-            return "red"
-        if temp >= 85:
-            return "orange1"
-        if temp >= 70:
-            return "yellow"
-        return "green"
-
-    @staticmethod
-    def _ratio_border(value: float | None, limit: float | None) -> str:
-        if value is None or limit is None or limit <= 0:
-            return "green"
-        ratio = value / limit
-        if ratio >= 0.95:
-            return "red"
-        if ratio >= 0.85:
-            return "orange1"
-        if ratio >= 0.70:
-            return "yellow"
-        return "green"
-
-    @staticmethod
-    def _battery_border(percent: int | None) -> str:
-        if percent is None:
-            return "green"
-        if percent < 20:
-            return "red"
-        if percent < 50:
-            return "yellow"
-        return "green"

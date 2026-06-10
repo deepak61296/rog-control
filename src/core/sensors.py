@@ -28,6 +28,7 @@ class CPUStats:
     current_freq_mhz: Optional[int] = None
     max_freq_mhz: Optional[int] = None
     governor: Optional[str] = None
+    util_percent: Optional[float] = None
 
 
 @dataclass
@@ -80,6 +81,7 @@ class SensorReader:
     def __init__(self):
         self._hwmon_paths = self._detect_hwmon_paths()
         self._nvidia_smi = shutil.which("nvidia-smi")
+        self._last_cpu_stat: tuple[int, int] | None = None
 
     def _detect_hwmon_paths(self) -> Dict[str, str]:
         paths: Dict[str, str] = {}
@@ -120,16 +122,41 @@ class SensorReader:
             return None
         return value / 1000.0
 
+    def _read_cpu_usage(self) -> float | None:
+        try:
+            with open("/proc/stat", "r", encoding="utf-8") as f:
+                line = f.readline()
+                parts = line.split()[1:]
+                idle = int(parts[3]) + int(parts[4])  # idle + iowait
+                total = sum(int(x) for x in parts)
+                
+                if self._last_cpu_stat is None:
+                    self._last_cpu_stat = (idle, total)
+                    return 0.0
+                
+                last_idle, last_total = self._last_cpu_stat
+                idle_delta = idle - last_idle
+                total_delta = total - last_total
+                self._last_cpu_stat = (idle, total)
+                
+                if total_delta == 0:
+                    return 0.0
+                return 100.0 * (1.0 - idle_delta / total_delta)
+        except Exception:
+            return None
+
     def _read_cpu(self, snapshot: SystemSnapshot) -> None:
         base = "/sys/devices/system/cpu/cpu0/cpufreq"
         current = self._read_int(os.path.join(base, "scaling_cur_freq"))
         maximum = self._read_int(os.path.join(base, "scaling_max_freq"))
         governor = self._read_sysfs(os.path.join(base, "scaling_governor"))
+        util = self._read_cpu_usage()
         snapshot.cpu = CPUStats(
             temp_c=self._read_hwmon_temp("k10temp"),
             current_freq_mhz=current // 1000 if current is not None else None,
             max_freq_mhz=maximum // 1000 if maximum is not None else None,
             governor=governor,
+            util_percent=util,
         )
 
     def _read_amd_gpu(self, snapshot: SystemSnapshot) -> None:
@@ -166,17 +193,26 @@ class SensorReader:
         if len(parts) < 6:
             return Capability(False, f"Unexpected nvidia-smi output: {line}")
 
-        try:
-            snapshot.nvidia_gpu = NvidiaGPUStats(
-                temp_c=float(parts[0]),
-                power_w=float(parts[1]),
-                clock_mhz=int(parts[2]),
-                util_percent=int(parts[3]),
-                vram_used_mb=int(parts[4]),
-                vram_total_mb=int(parts[5]),
-            )
-        except ValueError as exc:
-            return Capability(False, f"Failed to parse nvidia-smi output: {exc}")
+        def safe_float(val: str) -> float | None:
+            try:
+                return float(val)
+            except ValueError:
+                return None
+
+        def safe_int(val: str) -> int | None:
+            try:
+                return int(val)
+            except ValueError:
+                return None
+
+        snapshot.nvidia_gpu = NvidiaGPUStats(
+            temp_c=safe_float(parts[0]),
+            power_w=safe_float(parts[1]),
+            clock_mhz=safe_int(parts[2]),
+            util_percent=safe_int(parts[3]),
+            vram_used_mb=safe_int(parts[4]),
+            vram_total_mb=safe_int(parts[5]),
+        )
 
         return Capability(True)
 

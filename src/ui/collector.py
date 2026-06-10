@@ -73,8 +73,10 @@ class DataCollector:
                     self.state.snapshot = snapshot
                     if snapshot.cpu.temp_c is not None:
                         self.state.cpu_temp_history = (self.state.cpu_temp_history + [snapshot.cpu.temp_c])[-32:]
-                    if snapshot.amd_gpu.temp_c is not None:
-                        self.state.amd_gpu_temp_history = (self.state.amd_gpu_temp_history + [snapshot.amd_gpu.temp_c])[-32:]
+                    if snapshot.cpu.util_percent is not None:
+                        self.state.cpu_util_history = (self.state.cpu_util_history + [snapshot.cpu.util_percent])[-32:]
+                    if snapshot.nvidia_gpu.util_percent is not None:
+                        self.state.gpu_util_history = (self.state.gpu_util_history + [float(snapshot.nvidia_gpu.util_percent)])[-32:]
                     for message in snapshot.errors:
                         self._record_error_unlocked(message)
             except Exception as exc:
@@ -135,6 +137,7 @@ class DataCollector:
                     current_freq_mhz=old.cpu.current_freq_mhz,
                     max_freq_mhz=old.cpu.max_freq_mhz,
                     governor=old.cpu.governor,
+                    util_percent=old.cpu.util_percent,
                 ),
                 amd_gpu=AMDGPUStats(
                     temp_c=old.amd_gpu.temp_c,
@@ -195,5 +198,7 @@ class DataCollector:
                 pending_confirm=self.state.pending_confirm,
                 cpu_temp_history=list(self.state.cpu_temp_history),
                 amd_gpu_temp_history=list(self.state.amd_gpu_temp_history),
+                cpu_util_history=list(self.state.cpu_util_history),
+                gpu_util_history=list(self.state.gpu_util_history),
                 errors=list(self.state.errors),
             )

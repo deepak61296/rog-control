@@ -80,7 +80,7 @@ async def _run_keyboard_shortcut() -> None:
         await pilot.press("1")
         await pilot.pause(0.2)
         assert collector.cpu.calls == [2500000]
-        assert app.active_control_panel is None
+        assert app.active_control_panel == "cpu"
 
     assert collector.started
     assert collector.stopped
