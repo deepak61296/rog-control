@@ -8,21 +8,23 @@ A Textual-based terminal dashboard for monitoring and safely controlling fans, C
 
 ## Features
 
-- Live CPU, AMD iGPU, NVIDIA dGPU, fan, battery, and NVMe telemetry
+- One-screen dashboard replacing htop + nvtop: nvtop-style scrolling braille graphs for CPU utilization/temperature and GPU utilization/VRAM
+- Per-core CPU load strip, RAM/swap gauges, RyzenAdj power-limit gauges, fans, battery, iGPU, and NVMe telemetry
 - CPU frequency presets, RyzenAdj power presets, and fan curve controls
+- Hardware safety: power values clamped to safe bounds, and a root-daemon thermal watchdog that drops to a cool power preset on sustained CPU overtemp
 - Capability-aware UI that keeps unsupported features visible but clearly marked unavailable
 - Textual UI with clickable controls, keyboard shortcuts, scrolling, and modal confirmations
 - Background action worker so hardware commands do not freeze the interface
-- Aggressive fan curves by default to keep the Zephyrus G14 cool
 
 ## Interface
 
 ```
-Header: backend health for CPU hwmon, AMD GPU, NVIDIA, RyzenAdj, and asusctl
-Dashboard: CPU, Cooling, AMD iGPU, NVIDIA dGPU, Power, and Battery panels
-Controls: clickable CPU, power, fans, and quick preset actions
-Status: current CPU cap, power limit, fan profile, latest result, and recent warnings
-Footer: keyboard shortcuts
+Dashboard: CPU graph (util + temp) with per-core strip, GPU graph (util + VRAM),
+           memory gauges, power-limit gauges, and system panel (fans, iGPU,
+           battery, NVMe, active profile)
+Controls:  clickable CPU, power, fans, and quick preset tabs (keys 1-4)
+Status:    latest action result and recent warnings
+Footer:    keyboard shortcuts
 ```
 
 ## Requirements

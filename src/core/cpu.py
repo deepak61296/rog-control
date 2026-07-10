@@ -150,6 +150,9 @@ class CPUController:
         return self.set_max_freq(freq_khz)
 
     def set_governor(self, governor: str) -> tuple[bool, str]:
+        if not self.capability.available:
+            self.last_error = self.capability.reason
+            return False, self.last_error
         if governor not in self.get_available_governors():
             return False, f"Governor not available: {governor}"
         for core in range(self.num_cores):

@@ -12,17 +12,18 @@ Target environment:
 ## Architecture
 
 - `src/main.py`: CLI entrypoint, `--no-sudo`, startup sudo priming, and sudo keepalive.
-- `src/ui/app.py`: Textual app, layout, keyboard bindings, buttons, confirmation modal, and UI refresh.
+- `src/ui/app.py`: Textual app, dashboard panels, keyboard bindings, buttons, confirmation modal, and UI refresh.
+- `src/ui/widgets.py`: custom monitoring widgets — `BrailleGraph` (nvtop-style multi-series scrolling line chart), `GaugeBar`, and the per-core load strip. Graph rendering lives in the pure `build_braille_graph` for testability.
 - `src/ui/actions.py`: typed control actions and hardware action sequencing.
-- `src/ui/collector.py`: background telemetry polling and thread-safe `AppState` snapshots.
+- `src/ui/collector.py`: background telemetry polling and thread-safe `AppState` snapshots (histories are `HISTORY_LENGTH` samples).
 - `src/ui/state.py`: UI state dataclass.
-- `src/core/sensors.py`: sysfs and `nvidia-smi` telemetry.
+- `src/core/sensors.py`: sysfs and `nvidia-smi` telemetry, including per-core `/proc/stat` utilization, `/proc/meminfo`, and AMD iGPU busy percent. Parsers are pure functions (`parse_proc_stat`, `parse_meminfo`, `utilization_percent`).
 - `src/core/cpu.py`: CPU frequency reads and writes.
-- `src/core/power.py`: RyzenAdj discovery, telemetry parsing, and power presets.
+- `src/core/power.py`: RyzenAdj discovery, telemetry parsing, and power presets. `apply_custom` clamps to `*_BOUNDS` in both directions.
 - `src/core/fans.py`: `asusctl` profile and fan curve control.
 - `src/core/profile.py`: validated persistent profile storage under `/etc/rog-control/profile.json`.
 - `src/core/process.py`: subprocess wrapper with timeout/process-group cleanup.
-- `src/daemon.py`: root daemon that reapplies the saved profile after boot and when the profile changes.
+- `src/daemon.py`: root daemon that reapplies the saved profile after boot and when the profile changes. Includes `ThermalWatchdog` (forces the `cool` power preset after sustained CPU overtemp, latched until cooldown or profile change) and refuses profile files not exclusively owned by root.
 
 The UI should not read sysfs or call vendor tools directly. Add or change hardware operations in `src/core/*`, expose user-triggered operations through `src/ui/actions.py`, and render results from `AppState`.
 
@@ -30,6 +31,9 @@ The UI should not read sysfs or call vendor tools directly. Add or change hardwa
 
 - Keep preset limits conservative unless explicitly asked otherwise.
 - Do not add 80W/max RyzenAdj presets or 5.26 GHz CPU presets without an explicit request.
+- `PowerController.apply_custom` must clamp all values to the `*_BOUNDS` class constants (both directions); never widen the bounds without an explicit request.
+- The daemon `ThermalWatchdog` only ever acts in the safe direction (reducing power). Do not make it raise limits or auto-restore.
+- `install_nopasswd.sh` must never emit sudoers wildcards for paths or ryzenadj arguments — sudoers `*` matches `/` and `..`, which is a local privilege escalation. Enumerate explicit paths/commands and validate with `visudo -cf` before installing.
 - Keep confirmations for 55W+ power, max fan mode, and performance quick preset.
 - Never allow interactive sudo prompts inside the running TUI.
 - Sudo-backed commands must use `start_new_session=False` so startup `sudo -v` caching works.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.core.profile import SavedProfile
-from src.daemon import apply_config
+from src.daemon import ThermalWatchdog, apply_config, profile_file_is_safe
 
 
 class FakeCPU:
@@ -74,3 +74,51 @@ def test_daemon_applies_fan_reset() -> None:
         ("reset_fan_curve", "Quiet"),
         ("enable_custom_curves", "Quiet", False),
     ]
+
+
+def test_watchdog_trips_only_after_sustained_overtemp() -> None:
+    watchdog = ThermalWatchdog(trip_temp_c=93.0, hold_seconds=20.0, clear_temp_c=80.0)
+
+    assert not watchdog.check(96.0, now=0.0)
+    assert not watchdog.check(96.0, now=10.0)
+    assert watchdog.check(96.0, now=20.0)
+    assert watchdog.tripped
+    # Latched: fires once, not repeatedly.
+    assert not watchdog.check(96.0, now=22.0)
+
+
+def test_watchdog_ignores_brief_spikes_and_missing_readings() -> None:
+    watchdog = ThermalWatchdog(trip_temp_c=93.0, hold_seconds=20.0, clear_temp_c=80.0)
+
+    assert not watchdog.check(96.0, now=0.0)
+    assert not watchdog.check(85.0, now=10.0)  # dipped below trip: timer resets
+    assert not watchdog.check(96.0, now=12.0)
+    assert not watchdog.check(None, now=20.0)  # sensor gap: timer resets
+    assert not watchdog.check(96.0, now=31.0)
+    assert not watchdog.tripped
+
+
+def test_watchdog_rearms_after_cooldown() -> None:
+    watchdog = ThermalWatchdog(trip_temp_c=93.0, hold_seconds=20.0, clear_temp_c=80.0)
+
+    watchdog.check(96.0, now=0.0)
+    assert watchdog.check(96.0, now=20.0)
+    assert not watchdog.check(90.0, now=30.0)  # still hot: stays latched
+    assert watchdog.tripped
+    assert not watchdog.check(75.0, now=40.0)  # cooled below clear: re-armed
+    assert not watchdog.tripped
+    watchdog.check(96.0, now=50.0)
+    assert watchdog.check(96.0, now=70.0)
+
+
+def test_profile_file_safety_rejects_non_root_and_writable(tmp_path) -> None:
+    path = tmp_path / "profile.json"
+    path.write_text("{}", encoding="utf-8")
+
+    # Not owned by root (tests do not run as root).
+    safe, reason = profile_file_is_safe(str(path))
+    assert not safe
+    assert "not owned by root" in reason
+
+    safe, reason = profile_file_is_safe(str(tmp_path / "missing.json"))
+    assert not safe

@@ -7,17 +7,18 @@ import threading
 import time
 from collections import defaultdict
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, Grid, Container
-from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Label, Static, Sparkline, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Header, Label, Static, TabbedContent, TabPane
 
 from src.ui.actions import ControlAction, execute_control_action
 from src.ui.collector import DataCollector
 from src.ui.state import AppState
+from src.ui.widgets import BrailleGraph, GaugeBar, build_core_strip
 
 logger = logging.getLogger(__name__)
 
@@ -29,25 +30,39 @@ PANEL_TITLES = {
 }
 PANEL_ORDER = ("cpu", "power", "fans", "quick")
 
+COLOR_UTIL = "#39ff14"
+COLOR_TEMP = "#ff0033"
+COLOR_VRAM = "#00e5ff"
+COLOR_DIM = "#6e7681"
 
-class MetricRow(Static):
-    """A row containing a label on the left and a reactive value on the right."""
-    
-    value = reactive("---")
 
-    def __init__(self, label: str, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.label_text = label
-        self._value_label = Label(self.value, classes="metric-value")
+def read_cpu_model() -> str:
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("model name"):
+                    model = line.split(":", 1)[1].strip()
+                    for marker in (" w/ ", " with "):
+                        if marker in model:
+                            model = model.split(marker, 1)[0]
+                    return model.strip()
+    except OSError:
+        pass
+    return "CPU"
 
-    def compose(self) -> ComposeResult:
-        with Horizontal(classes="metric-row"):
-            yield Label(self.label_text, classes="metric-label")
-            yield self._value_label
 
-    def watch_value(self, value: str) -> None:
-        if hasattr(self, "_value_label"):
-            self._value_label.update(value)
+class StatStrip(Static):
+    """Single line of `LABEL value` pairs with per-value colors."""
+
+    def set_stats(self, items: list[tuple[str, str, str]]) -> None:
+        text = Text(no_wrap=True, overflow="ellipsis")
+        for index, (label, value, color) in enumerate(items):
+            if index:
+                text.append("  ")
+            if label:
+                text.append(f"{label} ", style=COLOR_DIM)
+            text.append(value, style=f"bold {color}")
+        self.update(text)
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -112,131 +127,235 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(True)
 
 
-class CPUDashboard(Static):
+class CPUPanel(Static):
+    """CPU utilization/temperature graph with stats and per-core strip."""
+
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("CPU", classes="card-title")
-            self.temp = MetricRow("Temperature")
-            yield self.temp
-            self.freq = MetricRow("Current Freq")
-            yield self.freq
-            self.limit = MetricRow("Limit Freq")
-            yield self.limit
-            self.power = MetricRow("Package Power")
-            yield self.power
-            self.profile = MetricRow("System Profile")
-            yield self.profile
-            yield Label("Utilization %", classes="graph-title")
-            self.sparkline = Sparkline(summary_function=max)
-            yield self.sparkline
+        self.stats = StatStrip(classes="stat-strip")
+        yield self.stats
+        self.legend = StatStrip(classes="legend")
+        yield self.legend
+        self.graph = BrailleGraph(max_value=100.0)
+        yield self.graph
+        self.cores = Static(classes="core-strip")
+        yield self.cores
+
+    def on_mount(self) -> None:
+        self.border_title = f"⡷ CPU · {read_cpu_model()}"
 
     def update_state(self, state: AppState) -> None:
         cpu = state.snapshot.cpu
-        temp = cpu.temp_c
-        self.temp.value = f"{temp:.0f} °C" if temp is not None else "---"
-        freq = cpu.current_freq_mhz
-        self.freq.value = f"{freq / 1000:.2f} GHz" if freq is not None else "---"
-        limit = cpu.max_freq_mhz
-        self.limit.value = f"{limit / 1000:.2f} GHz" if limit is not None else "---"
-        
-        power = state.power_info.stapm_value
-        self.power.value = f"{power:.1f} W" if power is not None else "---"
-        self.profile.value = state.fan_profile or "---"
+        temp = f"{cpu.temp_c:.0f}°C" if cpu.temp_c is not None else "---"
+        freq = f"{cpu.current_freq_mhz / 1000:.2f}GHz" if cpu.current_freq_mhz is not None else "---"
+        cap = f"{cpu.max_freq_mhz / 1000:.2f}GHz" if cpu.max_freq_mhz is not None else "---"
+        power = f"{state.power_info.stapm_value:.1f}W" if state.power_info.stapm_value is not None else "---"
+        load = f"{cpu.util_percent:.0f}%" if cpu.util_percent is not None else "---"
+        self.stats.set_stats(
+            [
+                ("TEMP", temp, COLOR_TEMP),
+                ("FREQ", freq, COLOR_UTIL),
+                ("CAP", cap, "#e6edf3"),
+                ("PWR", power, "#ffb700"),
+                ("GOV", cpu.governor or "---", "#e6edf3"),
+                ("LOAD", load, COLOR_UTIL),
+            ]
+        )
+        self.legend.set_stats(
+            [
+                ("", f"⣿ UTIL {load}", COLOR_UTIL),
+                ("", f"⣿ TEMP {temp}", COLOR_TEMP),
+            ]
+        )
+        self.graph.set_series(
+            [
+                (state.cpu_util_history, COLOR_UTIL),
+                (state.cpu_temp_history, COLOR_TEMP),
+            ]
+        )
+        self.cores.update(build_core_strip(cpu.per_core_util, cpu.per_core_freq_mhz))
 
-        if state.cpu_util_history:
-            self.sparkline.data = state.cpu_util_history
 
+class GPUPanel(Static):
+    """NVIDIA dGPU utilization/VRAM graph with stats."""
 
-class GPUDashboard(Static):
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("NVIDIA dGPU", classes="card-title")
-            self.temp = MetricRow("Temperature")
-            yield self.temp
-            self.clock = MetricRow("Clock")
-            yield self.clock
-            self.power = MetricRow("Power")
-            yield self.power
-            self.vram = MetricRow("VRAM")
-            yield self.vram
-            yield Label("Utilization %", classes="graph-title")
-            self.sparkline = Sparkline(summary_function=max)
-            yield self.sparkline
+        self.stats = StatStrip(classes="stat-strip")
+        yield self.stats
+        self.legend = StatStrip(classes="legend")
+        yield self.legend
+        self.graph = BrailleGraph(max_value=100.0)
+        yield self.graph
+
+    def on_mount(self) -> None:
+        self.border_title = "⣾ GPU · NVIDIA"
+
+    def set_gpu_name(self, name: str | None) -> None:
+        if name:
+            self.border_title = f"⣾ GPU · {name}"
 
     def update_state(self, state: AppState) -> None:
         gpu = state.snapshot.nvidia_gpu
-        temp = gpu.temp_c
-        self.temp.value = f"{temp:.0f} °C" if temp is not None else "---"
-        clock = gpu.clock_mhz
-        self.clock.value = f"{clock} MHz" if clock is not None else "---"
-        power = gpu.power_w
-        self.power.value = f"{power:.1f} W" if power is not None else "---"
-        
-        if gpu.vram_used_mb is not None and gpu.vram_total_mb is not None:
-            self.vram.value = f"{gpu.vram_used_mb}/{gpu.vram_total_mb} MB"
+        temp = f"{gpu.temp_c:.0f}°C" if gpu.temp_c is not None else "---"
+        clock = f"{gpu.clock_mhz}MHz" if gpu.clock_mhz is not None else "---"
+        power = f"{gpu.power_w:.1f}W" if gpu.power_w is not None else "---"
+        util = f"{gpu.util_percent}%" if gpu.util_percent is not None else "---"
+        if gpu.vram_used_mb is not None and gpu.vram_total_mb:
+            vram = f"{gpu.vram_used_mb / 1024:.1f}/{gpu.vram_total_mb / 1024:.1f}GB"
+            vram_pct = f"{gpu.vram_used_mb / gpu.vram_total_mb * 100:.0f}%"
         else:
-            self.vram.value = "---"
+            vram, vram_pct = "---", "---"
+        self.stats.set_stats(
+            [
+                ("TEMP", temp, COLOR_TEMP),
+                ("CLK", clock, COLOR_UTIL),
+                ("PWR", power, "#ffb700"),
+                ("VRAM", vram, COLOR_VRAM),
+            ]
+        )
+        self.legend.set_stats(
+            [
+                ("", f"⣿ UTIL {util}", COLOR_UTIL),
+                ("", f"⣿ VRAM {vram_pct}", COLOR_VRAM),
+            ]
+        )
+        self.graph.set_series(
+            [
+                (state.gpu_util_history, COLOR_UTIL),
+                (state.vram_util_history, COLOR_VRAM),
+            ]
+        )
 
-        if state.gpu_util_history:
-            self.sparkline.data = state.gpu_util_history
 
+class MemoryPanel(Static):
+    """RAM and swap gauges."""
 
-class PowerDashboard(Static):
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Power Limits", classes="card-title")
-            self.stapm = MetricRow("STAPM (Sustained)")
-            yield self.stapm
-            self.fast = MetricRow("Fast PPT (Boost)")
-            yield self.fast
-            self.slow = MetricRow("Slow PPT (Long)")
-            yield self.slow
-            self.tctl = MetricRow("Thermal Target")
-            yield self.tctl
+        self.ram = GaugeBar("RAM", label_width=5)
+        yield self.ram
+        self.swap = GaugeBar("SWAP", label_width=5)
+        yield self.swap
+        self.detail = StatStrip(classes="stat-strip")
+        yield self.detail
+
+    def on_mount(self) -> None:
+        self.border_title = "⡪ MEMORY"
+
+    def update_state(self, state: AppState) -> None:
+        memory = state.snapshot.memory
+
+        def gb(value_mb: int | None) -> str:
+            return f"{value_mb / 1024:.1f}" if value_mb is not None else "?"
+
+        if memory.total_mb:
+            self.ram.set_gauge(memory.used_mb, memory.total_mb, f"{gb(memory.used_mb)}/{gb(memory.total_mb)}G")
+        else:
+            self.ram.set_gauge(None, None, "---")
+        if memory.swap_total_mb:
+            self.swap.set_gauge(memory.swap_used_mb, memory.swap_total_mb, f"{gb(memory.swap_used_mb)}/{gb(memory.swap_total_mb)}G")
+        else:
+            self.swap.set_gauge(None, None, "---")
+        available = f"{gb(memory.available_mb)}G" if memory.available_mb is not None else "---"
+        self.detail.set_stats([("AVAIL", available, "#e6edf3")])
+
+
+class PowerPanel(Static):
+    """RyzenAdj limit gauges: measured value against configured limit."""
+
+    def compose(self) -> ComposeResult:
+        self.stapm = GaugeBar("STAPM", label_width=6)
+        yield self.stapm
+        self.fast = GaugeBar("FAST", label_width=6)
+        yield self.fast
+        self.slow = GaugeBar("SLOW", label_width=6)
+        yield self.slow
+        self.tctl = GaugeBar("TCTL", label_width=6)
+        yield self.tctl
+
+    def on_mount(self) -> None:
+        self.border_title = "⢾ POWER LIMITS"
 
     def update_state(self, state: AppState) -> None:
         info = state.power_info
-        
-        def fmt(val: float | None, lim: float | None, unit: str = "W") -> str:
-            v = f"{val:.1f}" if val is not None else "---"
-            l = f"{lim:.0f}" if lim is not None else "---"
-            return f"{v} / {l} {unit}"
 
-        self.stapm.value = fmt(info.stapm_value, info.stapm_limit)
-        self.fast.value = fmt(info.fast_value, info.fast_limit)
-        self.slow.value = fmt(info.slow_value, info.slow_limit)
-        self.tctl.value = fmt(info.tctl_value, info.tctl_limit, "°C")
+        def apply(gauge: GaugeBar, value: float | None, limit: float | None, unit: str) -> None:
+            if value is None and limit is None:
+                gauge.set_gauge(None, None, "---")
+                return
+            value_text = f"{value:.1f}" if value is not None else "?"
+            limit_text = f"{limit:.0f}" if limit is not None else "?"
+            gauge.set_gauge(value, limit, f"{value_text}/{limit_text}{unit}")
+
+        apply(self.stapm, info.stapm_value, info.stapm_limit, "W")
+        apply(self.fast, info.fast_value, info.fast_limit, "W")
+        apply(self.slow, info.slow_value, info.slow_limit, "W")
+        apply(self.tctl, info.tctl_value, info.tctl_limit, "°")
 
 
-class CoolingDashboard(Static):
+class SystemPanel(Static):
+    """Fans, iGPU, battery, NVMe, and active profile."""
+
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Cooling", classes="card-title")
-            self.cpu_fan = MetricRow("CPU Fan")
-            yield self.cpu_fan
-            self.gpu_fan = MetricRow("GPU Fan")
-            yield self.gpu_fan
-            self.profile = MetricRow("Active Profile")
-            yield self.profile
-            self.curve = MetricRow("Custom Curve")
-            yield self.curve
+        self.fans = StatStrip(classes="stat-strip")
+        yield self.fans
+        self.igpu = StatStrip(classes="stat-strip")
+        yield self.igpu
+        self.battery = GaugeBar("BAT", label_width=4, high_is_good=True)
+        yield self.battery
+        self.other = StatStrip(classes="stat-strip")
+        yield self.other
+
+    def on_mount(self) -> None:
+        self.border_title = "⣠ SYSTEM"
 
     def update_state(self, state: AppState) -> None:
         cooling = state.snapshot.cooling
-        self.cpu_fan.value = f"{cooling.cpu_fan_rpm} RPM" if cooling.cpu_fan_rpm else "---"
-        self.gpu_fan.value = f"{cooling.gpu_fan_rpm} RPM" if cooling.gpu_fan_rpm else "---"
-        self.profile.value = state.fan_profile or "---"
-        
-        if state.custom_curve_enabled is None:
-            self.curve.value = "---"
+        cpu_fan = f"{cooling.cpu_fan_rpm}" if cooling.cpu_fan_rpm else "---"
+        gpu_fan = f"{cooling.gpu_fan_rpm}" if cooling.gpu_fan_rpm else "---"
+        curve = "---"
+        if state.custom_curve_enabled is not None:
+            curve = "CUSTOM" if state.custom_curve_enabled else "FIRMWARE"
+        self.fans.set_stats(
+            [
+                ("FANS", f"{cpu_fan}/{gpu_fan}rpm", COLOR_UTIL),
+                ("CURVE", curve, "#e6edf3"),
+            ]
+        )
+
+        igpu = state.snapshot.amd_gpu
+        busy = f"{igpu.busy_percent}%" if igpu.busy_percent is not None else "---"
+        igpu_temp = f"{igpu.temp_c:.0f}°C" if igpu.temp_c is not None else "---"
+        igpu_clock = f"{igpu.clock_mhz}MHz" if igpu.clock_mhz is not None else "---"
+        igpu_power = f"{igpu.power_w:.1f}W" if igpu.power_w is not None else "---"
+        self.igpu.set_stats(
+            [
+                ("iGPU", busy, COLOR_UTIL),
+                ("", igpu_temp, COLOR_TEMP),
+                ("", igpu_clock, "#e6edf3"),
+                ("", igpu_power, "#ffb700"),
+            ]
+        )
+
+        battery = state.snapshot.battery
+        if battery.percent is not None:
+            status = (battery.status or "").upper()[:11]
+            power = f" {battery.power_w:.1f}W" if battery.power_w else ""
+            self.battery.set_gauge(battery.percent, 100.0, f"{battery.percent}% {status}{power}".strip())
         else:
-            self.curve.value = "Enabled" if state.custom_curve_enabled else "Disabled"
+            self.battery.set_gauge(None, None, "---")
+
+        nvme = f"{state.snapshot.nvme_temp_c:.0f}°C" if state.snapshot.nvme_temp_c is not None else "---"
+        self.other.set_stats(
+            [
+                ("NVME", nvme, COLOR_TEMP),
+                ("PROFILE", state.fan_profile or "---", COLOR_UTIL),
+            ]
+        )
 
 
 class RogControlApp(App[None]):
     """Main Textual application."""
 
-    TITLE = "ROG Control"
+    TITLE = "ROG CONTROL"
     ENABLE_COMMAND_PALETTE = False
 
     CSS = """
@@ -244,98 +363,93 @@ class RogControlApp(App[None]):
     $secondary: #ff0033;
     $success: #39ff14;
     $warning: #ff0033;
-    $surface: #110505;
-    $background: #050000;
-    $text-muted: #8b949e;
+    $surface: #0a0d10;
+    $background: #030304;
+    $text-muted: #6e7681;
 
     Screen {
         layout: vertical;
         background: $background;
     }
 
+    Header {
+        background: $background;
+        color: $primary;
+        text-style: bold;
+    }
+
     #main-grid {
         layout: grid;
         grid-size: 2 1;
-        grid-columns: 2fr 1fr;
+        grid-columns: 1fr 36;
         height: 1fr;
     }
 
-    .dashboard-pane {
-        layout: grid;
-        grid-size: 2 2;
-        padding: 1 2;
-        grid-gutter: 1 2;
+    #dashboard {
+        layout: vertical;
+        padding: 0 1;
         overflow-y: auto;
     }
 
+    .panel {
+        border: round #1d5c26;
+        border-title-color: $primary;
+        border-title-style: bold;
+        background: $surface;
+        padding: 0 1;
+    }
+
+    CPUPanel {
+        height: 2fr;
+        min-height: 10;
+        margin-bottom: 0;
+    }
+
+    GPUPanel {
+        height: 2fr;
+        min-height: 9;
+    }
+
+    #bottom-row {
+        layout: grid;
+        grid-size: 3 1;
+        grid-columns: 3fr 4fr 5fr;
+        grid-gutter: 0 1;
+        height: 8;
+        min-height: 8;
+    }
+
+    MemoryPanel, PowerPanel, SystemPanel {
+        height: 100%;
+    }
+
+    .stat-strip, .legend, .core-strip {
+        height: 1;
+    }
+
+    .legend {
+        color: $text-muted;
+    }
+
+    GaugeBar {
+        margin-bottom: 0;
+    }
+
     .control-pane {
-        border-left: vkey #30363d;
+        border-left: vkey #1d5c26;
         background: $surface;
         padding: 0 1;
         overflow-y: auto;
     }
 
-    .card {
-        border: round $primary;
-        background: #0d1117;
-        padding: 0 1;
-        height: 100%;
-        min-height: 12;
-    }
-
-    .card-title {
-        text-style: bold;
-        color: $primary;
-        width: 100%;
-        text-align: center;
-        margin-bottom: 1;
-        border-bottom: solid $primary;
-    }
-    
-    .graph-title {
-        color: $text-muted;
-        text-style: italic;
-        margin-top: 1;
-    }
-
-    .metric-row {
-        layout: horizontal;
-        height: auto;
-    }
-
-    .metric-label {
-        width: 1fr;
-        color: $text-muted;
-    }
-
-    .metric-value {
-        width: 1fr;
-        text-align: right;
-        text-style: bold;
-    }
-
-    Sparkline {
-        height: 1fr;
-        min-height: 3;
-        margin-top: 1;
-    }
-
-    Sparkline > .sparkline--max-color {
-        color: $secondary;
-    }
-
-    Sparkline > .sparkline--min-color {
-        color: $success;
-    }
-    
     TabbedContent {
         height: auto;
     }
-    
+
     TabPane {
         padding: 1 0;
     }
-    
+
     .action-button {
         width: 100%;
         margin-bottom: 1;
@@ -367,7 +481,7 @@ class RogControlApp(App[None]):
         margin-bottom: 1;
         height: auto;
     }
-    
+
     #status-bar {
         height: 1;
         padding: 0 1;
@@ -454,29 +568,32 @@ class RogControlApp(App[None]):
         self.collector = collector or DataCollector(self.state)
         self.running_action: ControlAction | None = None
         self.actions = self._build_actions()
-        
+
         self.actions_by_panel: dict[str, list[ControlAction]] = defaultdict(list)
         self.actions_by_key: dict[str, dict[str, ControlAction]] = defaultdict(dict)
         self.actions_by_button_id: dict[str, ControlAction] = {}
         for action in self.actions:
             self.actions_by_panel[action.panel].append(action)
             self.actions_by_key[action.panel][action.key] = action
-            
+
         self.active_control_panel: str | None = "cpu"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        
+
         with Horizontal(id="main-grid"):
-            with Grid(classes="dashboard-pane"):
-                self.cpu_card = CPUDashboard(classes="card")
-                yield self.cpu_card
-                self.gpu_card = GPUDashboard(classes="card")
-                yield self.gpu_card
-                self.power_card = PowerDashboard(classes="card")
-                yield self.power_card
-                self.cooling_card = CoolingDashboard(classes="card")
-                yield self.cooling_card
+            with Vertical(id="dashboard"):
+                self.cpu_panel = CPUPanel(classes="panel")
+                yield self.cpu_panel
+                self.gpu_panel = GPUPanel(classes="panel")
+                yield self.gpu_panel
+                with Horizontal(id="bottom-row"):
+                    self.memory_panel = MemoryPanel(classes="panel")
+                    yield self.memory_panel
+                    self.power_panel = PowerPanel(classes="panel")
+                    yield self.power_panel
+                    self.system_panel = SystemPanel(classes="panel")
+                    yield self.system_panel
 
             with Vertical(classes="control-pane"):
                 with TabbedContent(id="tabs"):
@@ -498,6 +615,8 @@ class RogControlApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        gpu_name = getattr(getattr(self.collector, "sensors", None), "gpu_name", None)
+        self.gpu_panel.set_gpu_name(gpu_name)
         self.collector.start()
         self.set_interval(0.5, self.refresh_dashboard)
         self.refresh_dashboard()
@@ -507,15 +626,16 @@ class RogControlApp(App[None]):
 
     def refresh_dashboard(self) -> None:
         state = self.collector.current_state()
-        self.cpu_card.update_state(state)
-        self.gpu_card.update_state(state)
-        self.power_card.update_state(state)
-        self.cooling_card.update_state(state)
+        self.cpu_panel.update_state(state)
+        self.gpu_panel.update_state(state)
+        self.memory_panel.update_state(state)
+        self.power_panel.update_state(state)
+        self.system_panel.update_state(state)
 
         for action in self.actions:
             button = self.query_one(f"#action-{action.id}", Button)
             button.disabled = self.running_action is not None or not self._action_available(action, state)
-            
+
         if self.running_action:
             self.status_bar.update(f"Running action: {self.running_action.label}...")
         elif self._recent_status_message(state):

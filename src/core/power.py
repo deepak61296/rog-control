@@ -35,6 +35,12 @@ class PowerInfo:
 class PowerController:
     """Controls AMD Ryzen power management through ryzenadj."""
 
+    # Absolute hardware safety bounds (mW / °C) for any custom request.
+    STAPM_BOUNDS = (5000, 65000)
+    FAST_BOUNDS = (5000, 80000)
+    SLOW_BOUNDS = (5000, 65000)
+    TCTL_BOUNDS = (60, 95)
+
     POWER_PRESETS = {
         "silent": {"stapm": 15000, "fast": 20000, "slow": 15000, "tctl": 75},
         "battery": {"stapm": 25000, "fast": 30000, "slow": 25000, "tctl": 80},
@@ -160,12 +166,22 @@ class PowerController:
         success, output = self._run_ryzenadj(args)
         return success, "Power preset applied" if success else output
 
+    @staticmethod
+    def _clamp(value: int, bounds: tuple[int, int]) -> int:
+        low, high = bounds
+        return max(low, min(value, high))
+
     def apply_custom(self, stapm: int, fast: int, slow: int, tctl: int = 95) -> tuple[bool, str]:
-        # Enforce absolute hardware safety limits
-        safe_stapm = min(stapm, 65000)
-        safe_fast = min(fast, 80000)  # Boost can go slightly higher safely
-        safe_slow = min(slow, 65000)
-        safe_tctl = min(tctl, 95)
+        # Enforce absolute hardware safety limits in both directions: too-high
+        # values risk thermals/VRMs, near-zero values can starve the SMU under load.
+        safe_stapm = self._clamp(stapm, self.STAPM_BOUNDS)
+        safe_fast = self._clamp(fast, self.FAST_BOUNDS)
+        safe_slow = self._clamp(slow, self.SLOW_BOUNDS)
+        safe_tctl = self._clamp(tctl, self.TCTL_BOUNDS)
+        if safe_slow < safe_stapm:
+            safe_slow = safe_stapm
+        if safe_fast < safe_slow:
+            safe_fast = safe_slow
 
         args = [
             f"--stapm-limit={safe_stapm}",
