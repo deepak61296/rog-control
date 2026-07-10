@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 rog = "src.main:main"
+rog-daemon = "src.daemon:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

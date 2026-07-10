@@ -21,7 +21,7 @@ class SudoSession(AbstractContextManager["SudoSession"]):
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
         self.available = False
-        self._running = threading.Event()
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
     def __enter__(self) -> "SudoSession":
@@ -36,24 +36,29 @@ class SudoSession(AbstractContextManager["SudoSession"]):
         )
         if cached.returncode != 0:
             print("ROG Control needs sudo for CPU frequency and RyzenAdj controls.")
-            prompted = subprocess.run(["sudo", "-v"], check=False)
+            try:
+                prompted = subprocess.run(["sudo", "-v"], check=False)
+            except KeyboardInterrupt:
+                print("\nCancelled.")
+                sys.exit(130)
+
             if prompted.returncode != 0:
                 print("Continuing without sudo; write controls will be unavailable.", file=sys.stderr)
                 return self
 
         self.available = True
-        self._running.set()
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._keep_alive, daemon=True)
         self._thread.start()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self._running.clear()
+        self._stop_event.set()
         if self._thread is not None:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=2.0)
 
     def _keep_alive(self) -> None:
-        while self._running.wait(60.0):
+        while not self._stop_event.wait(60.0):
             subprocess.run(
                 ["sudo", "-n", "-v"],
                 check=False,

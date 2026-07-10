@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import defaultdict
 
 from textual import on
@@ -12,9 +13,8 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, Grid, Container
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Label, Static, Sparkline, TabbedContent, TabPane, Markdown
+from textual.widgets import Button, Footer, Header, Label, Static, Sparkline, TabbedContent, TabPane
 
-from src.core.sensors import Capability
 from src.ui.actions import ControlAction, execute_control_action
 from src.ui.collector import DataCollector
 from src.ui.state import AppState
@@ -24,11 +24,10 @@ logger = logging.getLogger(__name__)
 PANEL_TITLES = {
     "cpu": "CPU",
     "power": "Power",
-    "fan_profile": "Fans",
-    "fan_curve": "Curve",
+    "fans": "Fans",
     "quick": "Quick",
 }
-PANEL_ORDER = ("cpu", "power", "fan_profile", "fan_curve", "quick")
+PANEL_ORDER = ("cpu", "power", "fans", "quick")
 
 
 class MetricRow(Static):
@@ -125,11 +124,9 @@ class CPUDashboard(Static):
             yield self.limit
             self.power = MetricRow("Package Power")
             yield self.power
-            self.governor = MetricRow("Governor")
-            yield self.governor
-            self.util = MetricRow("Utilization")
-            yield self.util
-            yield Label("CPU Utilization History", classes="graph-title")
+            self.profile = MetricRow("System Profile")
+            yield self.profile
+            yield Label("Utilization %", classes="graph-title")
             self.sparkline = Sparkline(summary_function=max)
             yield self.sparkline
 
@@ -144,8 +141,7 @@ class CPUDashboard(Static):
         
         power = state.power_info.stapm_value
         self.power.value = f"{power:.1f} W" if power is not None else "---"
-        self.governor.value = cpu.governor or "---"
-        self.util.value = f"{cpu.util_percent:.1f} %" if cpu.util_percent is not None else "---"
+        self.profile.value = state.fan_profile or "---"
 
         if state.cpu_util_history:
             self.sparkline.data = state.cpu_util_history
@@ -161,16 +157,11 @@ class GPUDashboard(Static):
             yield self.clock
             self.power = MetricRow("Power")
             yield self.power
-            self.vram = MetricRow("VRAM Used")
+            self.vram = MetricRow("VRAM")
             yield self.vram
-            self.util = MetricRow("Utilization")
-            yield self.util
-            yield Label("GPU Utilization History", classes="graph-title")
+            yield Label("Utilization %", classes="graph-title")
             self.sparkline = Sparkline(summary_function=max)
             yield self.sparkline
-            yield Label("VRAM Utilization History", classes="graph-title")
-            self.vram_sparkline = Sparkline(summary_function=max)
-            yield self.vram_sparkline
 
     def update_state(self, state: AppState) -> None:
         gpu = state.snapshot.nvidia_gpu
@@ -186,13 +177,8 @@ class GPUDashboard(Static):
         else:
             self.vram.value = "---"
 
-        self.util.value = f"{gpu.util_percent:.1f} %" if gpu.util_percent is not None else "---"
-
         if state.gpu_util_history:
             self.sparkline.data = state.gpu_util_history
-            
-        if state.vram_util_history:
-            self.vram_sparkline.data = state.vram_util_history
 
 
 class PowerDashboard(Static):
@@ -251,6 +237,7 @@ class RogControlApp(App[None]):
     """Main Textual application."""
 
     TITLE = "ROG Control"
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     $primary: #39ff14;
@@ -394,9 +381,8 @@ class RogControlApp(App[None]):
     BINDINGS = [
         Binding("1", "shortcut_1", "CPU"),
         Binding("2", "shortcut_2", "Power"),
-        Binding("3", "shortcut_3", "Profile"),
-        Binding("4", "shortcut_4", "Curve"),
-        Binding("5", "shortcut_5", "Quick"),
+        Binding("3", "shortcut_3", "Fans"),
+        Binding("4", "shortcut_4", "Quick"),
         Binding("b", "back", "Back", show=False),
         Binding("escape", "back", "Back", show=False),
         Binding("ctrl+c", "quit_app", "Quit"),
@@ -417,12 +403,49 @@ class RogControlApp(App[None]):
         "5": ("Performance", "performance"),
         "6": ("High", "high"),
     }
-    FAN_PROFILES = {"1": "Performance", "2": "Balanced", "3": "Quiet"}
     FAN_CURVES = {"1": "aggressive", "2": "max"}
     QUICK_PRESETS = {
-        "1": ("Default", 2500000, "silent", "Balanced", "aggressive"),
-        "2": ("Balanced", 3500000, "balanced", "Balanced", "aggressive"),
-        "3": ("Performance", 4000000, "performance", "Performance", "max"),
+        "1": {
+            "name": "Ultra Battery Saver",
+            "freq": 1500000,
+            "power": "silent",
+            "fan_profile": "Quiet",
+            "fan_mode": "firmware",
+            "description": "1.50 GHz, 15W, Quiet, firmware fans.",
+        },
+        "2": {
+            "name": "Battery Saver",
+            "freq": 2500000,
+            "power": "silent",
+            "fan_profile": "Quiet",
+            "fan_mode": "firmware",
+            "description": "2.50 GHz, 15W, Quiet, firmware fans.",
+        },
+        "3": {
+            "name": "Battery Performance",
+            "freq": 3000000,
+            "power": "battery",
+            "fan_profile": "Balanced",
+            "fan_mode": "firmware",
+            "description": "3.00 GHz, 25W, Balanced, firmware fans.",
+        },
+        "4": {
+            "name": "PD Productivity",
+            "freq": 2500000,
+            "power": "pd",
+            "fan_profile": "Balanced",
+            "fan_mode": "firmware",
+            "description": "2.50 GHz, 20W, Balanced, firmware fans.",
+        },
+        "5": {
+            "name": "OEM Performance",
+            "freq": 3000000,
+            "power": "ac",
+            "fan_profile": "Performance",
+            "fan_mode": "max",
+            "description": "3.00 GHz, 30W, Performance, max fans.",
+            "confirmation": "Apply OEM Performance (30W with max fans)? Use only with the 240W ASUS adapter.",
+        },
     }
 
     def __init__(self, collector: DataCollector | None = None) -> None:
@@ -439,7 +462,7 @@ class RogControlApp(App[None]):
             self.actions_by_panel[action.panel].append(action)
             self.actions_by_key[action.panel][action.key] = action
             
-        self.active_control_panel: str | None = None
+        self.active_control_panel: str | None = "cpu"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -495,6 +518,8 @@ class RogControlApp(App[None]):
             
         if self.running_action:
             self.status_bar.update(f"Running action: {self.running_action.label}...")
+        elif self._recent_status_message(state):
+            self.status_bar.update(self._recent_status_message(state))
         elif state.errors:
             error_line = state.errors[0].strip().split("\n")[0]
             self.status_bar.update(f"WARNING: {error_line}")
@@ -512,12 +537,10 @@ class RogControlApp(App[None]):
     def action_shortcut_2(self) -> None: self._handle_shortcut("2")
     def action_shortcut_3(self) -> None: self._handle_shortcut("3")
     def action_shortcut_4(self) -> None: self._handle_shortcut("4")
-    def action_shortcut_5(self) -> None: self._handle_shortcut("5")
-
     def action_back(self) -> None:
         if self.active_control_panel is not None:
             self.active_control_panel = None
-            self.notify("Controls unfocused. Press 1-5 to select a panel.", severity="information")
+            self.notify("Controls unfocused. Press 1-4 to select a panel.", severity="information")
         else:
             self.exit()
 
@@ -527,12 +550,11 @@ class RogControlApp(App[None]):
             self.active_control_panel = event.pane.id.replace("tab-", "")
 
     def _handle_shortcut(self, key: str) -> None:
-        if self.active_control_panel is not None:
-            action = self.actions_by_key[self.active_control_panel].get(key)
-            if action is not None:
-                self._request_action(action)
+        panel_map = {"1": "cpu", "2": "power", "3": "fans", "4": "quick"}
+        if key not in panel_map:
             return
-        panel = {"1": "cpu", "2": "power", "3": "fan_profile", "4": "fan_curve", "5": "quick"}[key]
+
+        panel = panel_map[key]
         tabs = self.query_one("#tabs", TabbedContent)
         tabs.active = f"tab-{panel}"
         self.active_control_panel = panel
@@ -580,8 +602,25 @@ class RogControlApp(App[None]):
 
     def _finish_action(self, action: ControlAction, success: bool, message: str) -> None:
         self.running_action = None
-        self.notify(message, severity="information" if success else "error")
+        self.collector.update_message(message, "cyan" if success else "red")
+        if not success:
+            self.notify(self._notification_text(message), severity="error")
         self.refresh_dashboard()
+
+    @staticmethod
+    def _notification_text(message: str, limit: int = 96) -> str:
+        cleaned = " ".join(message.split())
+        if len(cleaned) <= limit:
+            return cleaned
+        return f"{cleaned[: limit - 1].rstrip()}..."
+
+    @staticmethod
+    def _recent_status_message(state: AppState) -> str:
+        if not state.message or state.message == "Press h for help.":
+            return ""
+        if time.time() - state.message_time > 8.0:
+            return ""
+        return state.message.strip().split("\n")[0]
 
     @staticmethod
     def _action_available(action: ControlAction, state: AppState) -> bool:
@@ -628,26 +667,12 @@ class RogControlApp(App[None]):
                 )
             )
 
-        for key, profile in self.FAN_PROFILES.items():
-            actions.append(
-                ControlAction(
-                    id=f"fan-profile-{key}",
-                    panel="fan_profile",
-                    key=key,
-                    label=profile,
-                    description=f"Apply {profile} profile.",
-                    kind="fan_profile",
-                    payload={"profile": profile},
-                    capabilities=("fan",),
-                )
-            )
-
         for key, preset in self.FAN_CURVES.items():
             confirmation = "Set fans to 100%?" if preset == "max" else None
             actions.append(
                 ControlAction(
                     id=f"fan-curve-{key}",
-                    panel="fan_curve",
+                    panel="fans",
                     key=key,
                     label=preset.replace("_", " ").title(),
                     description="Apply custom fan curve.",
@@ -660,9 +685,9 @@ class RogControlApp(App[None]):
         actions.append(
             ControlAction(
                 id="fan-curve-reset",
-                panel="fan_curve",
-                key="d",
-                label="Firmware defaults",
+                panel="fans",
+                key="3",
+                label="Firmware Default",
                 description="Reset to firmware fan control.",
                 kind="fan_reset",
                 payload={},
@@ -671,27 +696,18 @@ class RogControlApp(App[None]):
         )
 
         for key, preset in self.QUICK_PRESETS.items():
-            name, freq, power_preset, fan_profile, fan_curve = preset
-            confirmation = None
-            if name == "Performance":
-                confirmation = "Apply Performance preset (55W plus max fans)?"
+            name = str(preset["name"])
             actions.append(
                 ControlAction(
                     id=f"quick-{key}",
                     panel="quick",
                     key=key,
                     label=name,
-                    description=f"{freq / 1_000_000:.2f} GHz, {power_preset}, {fan_profile}.",
+                    description=str(preset["description"]),
                     kind="quick_preset",
-                    payload={
-                        "name": name,
-                        "freq": freq,
-                        "power": power_preset,
-                        "fan_profile": fan_profile,
-                        "fan_curve": fan_curve,
-                    },
+                    payload=preset,
                     capabilities=("cpu", "power", "fan"),
-                    confirmation=confirmation,
+                    confirmation=str(preset["confirmation"]) if "confirmation" in preset else None,
                 )
             )
         return actions

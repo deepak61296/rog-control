@@ -16,12 +16,13 @@ Target environment:
 - `src/ui/actions.py`: typed control actions and hardware action sequencing.
 - `src/ui/collector.py`: background telemetry polling and thread-safe `AppState` snapshots.
 - `src/ui/state.py`: UI state dataclass.
-- `src/ui/formatters.py` and `src/ui/theme.py`: display formatting and Rich/Textual styling helpers.
 - `src/core/sensors.py`: sysfs and `nvidia-smi` telemetry.
 - `src/core/cpu.py`: CPU frequency reads and writes.
 - `src/core/power.py`: RyzenAdj discovery, telemetry parsing, and power presets.
 - `src/core/fans.py`: `asusctl` profile and fan curve control.
+- `src/core/profile.py`: validated persistent profile storage under `/etc/rog-control/profile.json`.
 - `src/core/process.py`: subprocess wrapper with timeout/process-group cleanup.
+- `src/daemon.py`: root daemon that reapplies the saved profile after boot and when the profile changes.
 
 The UI should not read sysfs or call vendor tools directly. Add or change hardware operations in `src/core/*`, expose user-triggered operations through `src/ui/actions.py`, and render results from `AppState`.
 
@@ -36,15 +37,16 @@ The UI should not read sysfs or call vendor tools directly. Add or change hardwa
 - Long-running hardware writes must not run on the Textual UI path.
 
 Current presets:
-- CPU: 2.5, 3.0, 3.5, 4.0, 4.5 GHz caps.
-- Power: Silent 15W, Eco 25W, Cool 35W, Balanced 45W, Performance 55W, High 65W.
+- CPU: 2.5, 3.0, 3.5, 4.0, 4.5 GHz caps; Ultra Battery Saver Quick preset uses 1.5 GHz.
+- Power: Silent 15W, Battery 25W, PD 20W, AC 30W, Eco 25W, Cool 35W, Balanced 45W, Performance 55W, High 65W.
 - Fan curves: Aggressive and Max.
-- Quick presets: Default, Balanced, Performance.
+- Quick presets: Ultra Battery Saver, Battery Saver, Battery Performance, PD Productivity, OEM Performance.
 
 ## TUI Behavior
 
 - Textual handles keyboard, mouse, scroll, resize, and modal behavior.
-- Keyboard shortcuts: `1` CPU, `2` Power, `3` Profile, `4` Curve, `5` Quick, `b` close controls, `Esc` close controls or exit, `Ctrl+C` quit.
+- Keyboard shortcuts: `1` CPU, `2` Power, `3` Fans, `4` Quick, `b` close controls, `Esc` close controls or exit, `Ctrl+C` quit.
+- The command palette is disabled; keep the footer focused on app shortcuts only.
 - Buttons and keyboard shortcuts must route through the same `ControlAction` execution path.
 - Keep action execution single-flight: if one control action is running, disable other action buttons.
 - Keep the dashboard useful when backends are unavailable by showing warning state instead of fake telemetry.

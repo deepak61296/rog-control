@@ -47,14 +47,14 @@ class CPUController:
         if success:
             return Capability(True)
 
-        reason = output or "passwordless sudo is not available"
-        return Capability(False, f"CPU frequency writes need root or passwordless sudo: {reason}")
+        reason = output or "sudo is not available"
+        return Capability(False, f"CPU frequency writes need sudo: {reason}")
 
     @staticmethod
     def _format_write_error(output: str) -> str:
         cleaned = output.strip()
         if "a password is required" in cleaned.lower() or "password is required" in cleaned.lower():
-            return "CPU frequency writes need root or passwordless sudo; interactive sudo prompts are disabled in the TUI"
+            return "CPU frequency writes need sudo; interactive sudo prompts are disabled in the TUI"
         return cleaned or "Unable to write CPU frequency limit"
 
     def _count_cores(self) -> int:

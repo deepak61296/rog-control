@@ -64,19 +64,67 @@ class FakeCollector:
         self.state.message_style = style
 
 
-def test_keyboard_shortcut_opens_controls_and_runs_action() -> None:
+def test_keyboard_shortcut_selects_tab_without_running_action() -> None:
     asyncio.run(_run_keyboard_shortcut())
 
 
 async def _run_keyboard_shortcut() -> None:
     collector = FakeCollector()
     app = RogControlApp(collector=collector)
+    assert not app.ENABLE_COMMAND_PALETTE
 
     async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("2")
+        await pilot.pause(0.1)
+        assert app.active_control_panel == "power"
+
+        await pilot.press("3")
+        await pilot.pause(0.1)
+        assert app.active_control_panel == "fans"
+        fan_labels = [action.label for action in app.actions_by_panel["fans"]]
+        assert fan_labels == ["Aggressive", "Max", "Firmware Default"]
+
+        await pilot.press("4")
+        await pilot.pause(0.1)
+        assert app.active_control_panel == "quick"
+        quick_labels = [action.label for action in app.actions_by_panel["quick"]]
+        assert quick_labels == [
+            "Ultra Battery Saver",
+            "Battery Saver",
+            "Battery Performance",
+            "PD Productivity",
+            "OEM Performance",
+        ]
+        assert app.actions_by_panel["quick"][-1].confirmation == (
+            "Apply OEM Performance (30W with max fans)? Use only with the 240W ASUS adapter."
+        )
+
         await pilot.press("1")
-        await pilot.pause(0.2)
-        assert collector.cpu.calls == [2500000]
+        await pilot.pause(0.1)
+        assert collector.cpu.calls == []
         assert app.active_control_panel == "cpu"
 
     assert collector.started
     assert collector.stopped
+
+
+def test_successful_action_message_uses_status_bar_not_notification() -> None:
+    asyncio.run(_run_successful_action_message())
+
+
+async def _run_successful_action_message() -> None:
+    collector = FakeCollector()
+    app = RogControlApp(collector=collector)
+    notifications: list[tuple[str, str | None]] = []
+
+    def fake_notify(message: str, *args, **kwargs) -> None:
+        notifications.append((message, kwargs.get("severity")))
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.notify = fake_notify
+        action = app.actions_by_panel["fans"][0]
+        app._finish_action(action, True, "Custom fan curves enabled; not saved for reboot because sudo is not available")
+        await pilot.pause(0.1)
+
+        assert notifications == []
+        assert "not saved for reboot" in collector.state.message

@@ -219,7 +219,11 @@ class SensorReader:
     def _read_cooling(self, snapshot: SystemSnapshot) -> None:
         base = self._hwmon_paths.get("asus")
         if not base:
-            base = "/sys/devices/platform/asus-nb-wmi/hwmon/hwmon6"
+            paths = glob.glob("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon*")
+            if paths:
+                base = paths[0]
+            else:
+                return
 
         cpu_fan = self._read_int(os.path.join(base, "fan1_input"))
         gpu_fan = self._read_int(os.path.join(base, "fan2_input"))
@@ -248,9 +252,10 @@ class SensorReader:
             "amdgpu" in self._hwmon_paths,
             "" if "amdgpu" in self._hwmon_paths else "AMD GPU hwmon not detected",
         )
+        asus_paths = glob.glob("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon*")
         snapshot.capabilities["fan_hwmon"] = Capability(
-            "asus" in self._hwmon_paths or os.path.exists("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon6"),
-            "" if ("asus" in self._hwmon_paths or os.path.exists("/sys/devices/platform/asus-nb-wmi/hwmon/hwmon6")) else "ASUS fan hwmon not detected",
+            "asus" in self._hwmon_paths or len(asus_paths) > 0,
+            "" if ("asus" in self._hwmon_paths or len(asus_paths) > 0) else "ASUS fan hwmon not detected",
         )
         snapshot.capabilities["cpu_hwmon"] = Capability(
             "k10temp" in self._hwmon_paths,

@@ -26,6 +26,7 @@ def run_command(
     try:
         process = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -40,7 +41,11 @@ def run_command(
     except subprocess.TimeoutExpired:
         if process is not None:
             _terminate_process(process, start_new_session)
-            process.communicate()
+            try:
+                process.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                _kill_process(process, start_new_session)
+                process.communicate()
         return False, f"command timed out after {timeout}s"
     except OSError as exc:
         return False, str(exc)
@@ -55,6 +60,16 @@ def run_command(
 
 
 def _terminate_process(process: subprocess.Popen[str], started_new_session: bool) -> None:
+    try:
+        if started_new_session:
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+    except ProcessLookupError:
+        return
+
+
+def _kill_process(process: subprocess.Popen[str], started_new_session: bool) -> None:
     try:
         if started_new_session:
             os.killpg(process.pid, signal.SIGKILL)

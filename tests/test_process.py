@@ -20,3 +20,17 @@ def test_run_command_reports_timeout() -> None:
 
     assert not success
     assert "timed out after 1s" in output
+
+
+def test_run_command_kills_process_that_ignores_sigterm() -> None:
+    success, output = run_command(
+        [
+            sys.executable,
+            "-c",
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(5)",
+        ],
+        timeout=1,
+    )
+
+    assert not success
+    assert "timed out after 1s" in output

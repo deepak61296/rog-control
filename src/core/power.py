@@ -37,16 +37,19 @@ class PowerController:
 
     POWER_PRESETS = {
         "silent": {"stapm": 15000, "fast": 20000, "slow": 15000, "tctl": 75},
+        "battery": {"stapm": 25000, "fast": 30000, "slow": 25000, "tctl": 80},
+        "pd": {"stapm": 20000, "fast": 25000, "slow": 20000, "tctl": 80},
+        "ac": {"stapm": 30000, "fast": 35000, "slow": 30000, "tctl": 85},
         "eco": {"stapm": 25000, "fast": 35000, "slow": 25000, "tctl": 80},
         "cool": {"stapm": 35000, "fast": 45000, "slow": 35000, "tctl": 85},
         "balanced": {"stapm": 45000, "fast": 55000, "slow": 45000, "tctl": 90},
         "performance": {"stapm": 55000, "fast": 65000, "slow": 55000, "tctl": 95},
         "high": {"stapm": 65000, "fast": 75000, "slow": 65000, "tctl": 95},
-        "max": {"stapm": 80000, "fast": 80000, "slow": 80000, "tctl": 100},
     }
 
     def __init__(self):
         self.ryzenadj_path = self._find_ryzenadj()
+        self._sudo_prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
         self.capability = self._detect_capability()
         self.last_error = ""
 
@@ -60,7 +63,7 @@ class PowerController:
         return "ryzenadj"
 
     def _detect_capability(self) -> Capability:
-        if not shutil.which("sudo"):
+        if os.geteuid() != 0 and not shutil.which("sudo"):
             return Capability(False, "sudo not installed")
         if os.path.exists(self.ryzenadj_path):
             ryzenadj_available = True
@@ -70,11 +73,14 @@ class PowerController:
         if not ryzenadj_available:
             return Capability(False, "ryzenadj not installed")
 
+        if os.geteuid() == 0:
+            return Capability(True)
+
         success, output = run_command(["sudo", "-n", "true"], timeout=2, start_new_session=False)
         if success:
             return Capability(True)
 
-        reason = output or "passwordless sudo is not available"
+        reason = output or "sudo is not available"
         return Capability(False, f"RyzenAdj needs sudo: {reason}")
 
     def _run_ryzenadj(self, args: list[str]) -> tuple[bool, str]:
@@ -83,7 +89,7 @@ class PowerController:
             return False, self.last_error
 
         success, output = run_command(
-            ["sudo", "-n", self.ryzenadj_path, *args],
+            [*self._sudo_prefix, self.ryzenadj_path, *args],
             timeout=10,
             start_new_session=False,
         )
@@ -155,11 +161,17 @@ class PowerController:
         return success, "Power preset applied" if success else output
 
     def apply_custom(self, stapm: int, fast: int, slow: int, tctl: int = 95) -> tuple[bool, str]:
+        # Enforce absolute hardware safety limits
+        safe_stapm = min(stapm, 65000)
+        safe_fast = min(fast, 80000)  # Boost can go slightly higher safely
+        safe_slow = min(slow, 65000)
+        safe_tctl = min(tctl, 95)
+
         args = [
-            f"--stapm-limit={stapm}",
-            f"--fast-limit={fast}",
-            f"--slow-limit={slow}",
-            f"--tctl-temp={tctl}",
+            f"--stapm-limit={safe_stapm}",
+            f"--fast-limit={safe_fast}",
+            f"--slow-limit={safe_slow}",
+            f"--tctl-temp={safe_tctl}",
         ]
         success, output = self._run_ryzenadj(args)
         return success, "Power settings applied" if success else output
